@@ -488,12 +488,13 @@ async def chat_endpoint(req: ChatRequest, request: Request, user=Depends(auth.cu
 
 def fixed_response(sid: str, history: list[dict], message: str, answer: str,
                    headers: Optional[dict] = None) -> StreamingResponse:
-    """An answer written in code instead of by the model (it is not counted)."""
+    """An answer written in code instead of by the model (it is not counted). X-Fixed-Answer
+    tells the interface it can keep its doses (they are reviewed, not the model's)."""
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": answer})
     return StreamingResponse(
         iter([answer]), media_type="text/plain; charset=utf-8",
-        headers={"X-Session-Id": sid, **(headers or {})},
+        headers={"X-Session-Id": sid, "X-Fixed-Answer": "1", **(headers or {})},
     )
 
 

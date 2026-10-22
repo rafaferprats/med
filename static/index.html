@@ -23,6 +23,11 @@
         </span>
         <button type="button" class="usage" id="usage" hidden></button>
         <button class="btn upgrade" id="upgrade" hidden><span>Hazte </span>Premium</button>
+        <button type="button" class="btn lab-btn off" id="lab-btn">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+          <span class="lab-btn-text">Subir analítica</span><span class="lab-btn-short">Analítica</span><span class="lab-btn-badge">Premium</span>
+        </button>
+        <input type="file" id="lab-file" accept="application/pdf,.pdf" hidden>
         <button class="btn ghost" id="new-chat" title="Empezar una conversación nueva">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
           <span>Nueva consulta</span>
@@ -41,6 +46,11 @@
         <div class="hero-badge"><span class="pulse"></span> Privado · la IA funciona en local</div>
         <h1 class="hero-title">Tus dudas de salud,<br><span class="grad">resueltas en privado.</span></h1>
         <p class="hero-sub" id="hero-sub">Describe un síntoma, pregunta por un medicamento o comparte una imagen médica. <strong>Tu primera pregunta es gratis</strong>, sin registrarte.</p>
+        <figure class="hero-video">
+          <video id="demo-video" src="demo.mp4" poster="demo-poster.jpg" autoplay muted loop playsinline preload="metadata"
+                 aria-label="Vídeo de 45 segundos: cómo te explica la app tu analítica y responde tus dudas de salud, también en el embarazo y para niños"></video>
+          <button type="button" class="video-toggle" id="video-toggle" aria-label="Pausar el vídeo">Pausar</button>
+        </figure>
         <div class="suggestions" id="suggestions">
           <button class="chip" data-prompt="Llevo tres días con dolor de cabeza que empeora por la tarde. ¿A qué puede deberse?">
             <strong>Síntomas</strong><span>Dolor de cabeza desde hace 3 días</span>
@@ -98,6 +108,10 @@
         </div>
         <div class="context-row">
           <button type="button" class="context-chip" id="ctx-chip" aria-expanded="false"></button>
+          <button type="button" class="lab-btn chat off" id="lab-btn-chat">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+            <span class="lab-btn-text">Subir analítica</span><span class="lab-btn-short">Analítica</span><span class="lab-btn-badge">Premium</span>
+          </button>
         </div>
         <div class="context-panel" id="ctx-panel" hidden>
           <label>¿Para quién es?

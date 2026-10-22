@@ -175,8 +175,82 @@ function applyMedicationSafety(card, ctx) {
   }
 }
 
+// ---------- The same rules for the text outside the medication table ----------
+// The model can recommend in a paragraph what the table crosses out ("toma paracetamol o
+// ibuprofeno (hasta 400 mg)" to a pregnant woman). In the text: medicines this person must not
+// take are marked with a warning below, and doses become "según el prospecto" (the only doses
+// shown are the reviewed ones of the table). Answers written in code (opts.trusted) keep their doses.
+const PROSE_DOSE_RE = new RegExp(
+  String.raw`\s*\([^()]*?\b\d+(?:[.,]\d+)?\s?(?:-\s?\d+(?:[.,]\d+)?\s?)?(?:mg\/kg|mg|ml|mcg|µg|gramos?|g)(?![\/\w])[^()]*\)` +
+  String.raw`|\b(?:hasta |un máximo de |máximo )?\d+(?:[.,]\d+)?\s?mg\s?\/\s?\d+(?:[.,]\d+)?\s?ml\b` + // syrups: 120 mg/5 ml
+  String.raw`|\b(?:hasta |un máximo de |máximo )?\d+(?:[.,]\d+)?\s?(?:-\s?\d+(?:[.,]\d+)?\s?)?(?:mg\/kg|mg|ml|mcg|µg|gramos?|g)(?![\/\w])`,
+  "gi");
+// Words before a medicine that already make the sentence a warning ("no le des aspirina")
+const NEGATION_RE = /\b(no|nunca|evita\w*|evites|desaconsej\w*|contraindic\w*|ni|tampoco|prohibid\w*|alergi\w*|al[ée]rgic\w*)\b/i;
+
+function proseRisks(ctx) {
+  // Only the rules that depend on the person: the general "antibiotics need a prescription" rule
+  // would also mark "tu médico puede recetarte antibióticos"
+  return medicationRisks(ctx).filter(([re]) => re !== ANTIBIOTIC_RE);
+}
+
+function applyProseSafety(el, ctx, opts = {}) {
+  const risks = ctx ? proseRisks(ctx) : [];
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.parentElement.closest(".med-card, .prose-warning, .emergency, code")
+      ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  const warnings = new Map(); // block element -> {medicine: reason}
+  for (const node of nodes) {
+    if (!opts.trusted) {
+      node.nodeValue = node.nodeValue.replace(PROSE_DOSE_RE, (m) =>
+        /^\s*\(/.test(m) ? " (según el prospecto)" : "la dosis del prospecto");
+    }
+    if (!risks.length) continue;
+    const text = node.nodeValue;
+    const found = [];
+    for (const [re, reason] of risks) {
+      const word = new RegExp(String.raw`[\p{L}]*(?:${re.source})[\p{L}]*`, "giu");
+      for (const m of text.matchAll(word)) {
+        // the sentence so far ("Evitar: ibuprofeno, naproxeno" counts as a warning for both)
+        const before = text.slice(0, m.index).split(/[.!?;]/).pop().slice(-80);
+        if (NEGATION_RE.test(before)) continue;
+        if (!found.some((f) => f.index === m.index)) found.push({ index: m.index, word: m[0], reason });
+      }
+    }
+    if (!found.length) continue;
+    found.sort((a, b) => a.index - b.index);
+    const frag = document.createDocumentFragment();
+    let last = 0;
+    for (const f of found) {
+      frag.append(text.slice(last, f.index));
+      const mark = document.createElement("span");
+      mark.className = "prose-flag";
+      mark.title = f.reason;
+      mark.textContent = f.word;
+      frag.append(mark);
+      last = f.index + f.word.length;
+      const block = node.parentElement.closest("li")?.closest("ul, ol") || node.parentElement.closest("p, li, ul, ol") || node.parentElement;
+      if (!warnings.has(block)) warnings.set(block, new Map());
+      warnings.get(block).set(f.word.toLowerCase(), [f.word, f.reason]);
+    }
+    frag.append(text.slice(last));
+    node.replaceWith(frag);
+  }
+  for (const [block, items] of warnings) {
+    const note = document.createElement("p");
+    note.className = "prose-warning";
+    note.setAttribute("role", "note");
+    note.innerHTML = [...items.values()].map(([word, reason]) =>
+      `⚠️ <strong>${escapeHtml(word[0].toUpperCase() + word.slice(1))}:</strong> ${escapeHtml(reason)} Consulta a tu médico o farmacéutico.`).join("<br>");
+    block.after(note);
+  }
+}
+
 // Renders an answer and groups the "Medication:" section (title, table, "Avoid:" line) into a card
-function renderAnswer(el, text, ctx) {
+function renderAnswer(el, text, ctx, opts = {}) {
   text = text
     // the model sometimes appends JSON code blocks (with its own doses); never show them
     .replace(/`{2,3}\s*\w*[\s\S]*?(`{2,3}|$)/g, "")
@@ -195,7 +269,12 @@ function renderAnswer(el, text, ctx) {
     .trim();
   el.innerHTML = renderMarkdown(text);
   const start = [...el.children].find((c) => /^(Medicación|Medicacion|Medication):?$/i.test(c.querySelector("strong:first-child")?.textContent.trim() || ""));
-  if (!start) return;
+  if (start) buildMedCard(el, start, ctx);
+  applyProseSafety(el, ctx, opts);
+}
+
+// Groups the "Medication:" section (title, table, "Avoid:" line) into a card with the safety rules
+function buildMedCard(el, start, ctx) {
   const card = document.createElement("div");
   card.className = "med-card";
   card.innerHTML = `<div class="med-head">${PILL_ICON}<span>Medicación</span><small>Sin receta · pautas orientativas, revisa el prospecto</small></div>`;
@@ -204,7 +283,9 @@ function renderAnswer(el, text, ctx) {
   while (node) {
     const next = node.nextElementSibling;
     card.appendChild(node);
-    if (!next || /^\p{Lu}[\p{L} ]+:$/u.test(next.querySelector("strong:first-child")?.textContent.trim() || "")) break;
+    // the next section starts at the next bold heading; a bold "Evitar:" still belongs to the card
+    const heading = next?.querySelector("strong:first-child")?.textContent.trim() || "";
+    if (!next || (/^\p{Lu}[\p{L} ]+:$/u.test(heading) && !/^(Evitar|Avoid):$/i.test(heading))) break;
     node = next;
   }
   applyMedicationSafety(card, ctx);
@@ -221,9 +302,9 @@ function renderAnswer(el, text, ctx) {
 
 // Never lose an answer because of a formatting problem: if rendering fails, show it as plain
 // text, without doses (the safety layer above could not run)
-function showAnswer(el, text, ctx) {
+function showAnswer(el, text, ctx, opts = {}) {
   try {
-    renderAnswer(el, text, ctx);
+    renderAnswer(el, text, ctx, opts);
   } catch (err) {
     console.error("renderAnswer failed", err);
     const plain = text
@@ -235,7 +316,10 @@ function showAnswer(el, text, ctx) {
 }
 
 // ---------- Messages ----------
-function hideWelcome() { els.welcome.hidden = true; }
+function hideWelcome() {
+  els.welcome.hidden = true;
+  $("demo-video")?.pause();  // hidden: no point playing it
+}
 
 function scrollToBottom() { els.chat.scrollTop = els.chat.scrollHeight; }
 
@@ -289,7 +373,8 @@ function showMeta(msg, text, seconds, note) {
     </button>`;
   const btn = msg.meta.querySelector("button");
   btn.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(text); btn.querySelector("span").textContent = "Copiado"; }
+    // The text as shown, after the safety rules (not the model's original)
+    try { await navigator.clipboard.writeText(msg.content.innerText.trim() || text); btn.querySelector("span").textContent = "Copiado"; }
     catch { btn.querySelector("span").textContent = "No se pudo copiar"; }
     setTimeout(() => (btn.querySelector("span").textContent = "Copiar"), 1500);
   });
@@ -298,6 +383,7 @@ function showMeta(msg, text, seconds, note) {
 // ---------- Sending ----------
 function setBusy(busy) {
   els.app.classList.toggle("busy", busy);
+  labButtons().forEach((btn) => (btn.disabled = busy));
   els.send.title = busy ? "Parar" : "Enviar";
   els.send.setAttribute("aria-label", els.send.title);
   updateSendButton();
@@ -356,6 +442,7 @@ async function send(text) {
       throw err;
     }
     const guestAnswer = resp.headers.get("X-Guest") === "1";
+    const trusted = resp.headers.get("X-Fixed-Answer") === "1"; // written in code, reviewed doses
     state.sessionId = resp.headers.get("X-Session-Id") || state.sessionId;
     updateUsageFromHeaders(resp.headers);
     if (resp.headers.get("X-Emergency")) showEmergencyBanner(msg);
@@ -366,12 +453,12 @@ async function send(text) {
       const { value, done } = await reader.read();
       if (done) break;
       answer += decoder.decode(value, { stream: true });
-      showAnswer(msg.content, answer, ctxSnapshot);
+      showAnswer(msg.content, answer, ctxSnapshot, { trusted });
       scrollToBottom();
     }
     answer += decoder.decode();
     if (!answer.trim()) throw new Error("El modelo no ha devuelto ninguna respuesta.");
-    showAnswer(msg.content, answer, ctxSnapshot);
+    showAnswer(msg.content, answer, ctxSnapshot, { trusted });
     if (image) addImageNotes(msg, answer);
     if (guestAnswer) addSignupCta(msg, `¿Te ha servido? Crea una cuenta gratis para seguir preguntando: ${FREE.text} preguntas y ${FREE.image} imagen gratis.`);
   } catch (err) {
@@ -630,6 +717,7 @@ function enterGuestMode() {
   state.guest = true;
   els.usage.hidden = true; els.upgrade.hidden = true; els.logout.hidden = true;
   els.loginBtn.hidden = false; els.signupBtn.hidden = false;
+  renderLabButton();
   // A returning visitor who already used the free question shouldn't be promised another one
   fetch("guest", { cache: "no-store" }).then((r) => r.json()).then(({ remaining }) => {
     if (remaining === 0) {
@@ -638,6 +726,51 @@ function enterGuestMode() {
     }
   }).catch(() => {});
 }
+
+// ---------- "Upload lab report" button ----------
+// Green when this person can upload a report now (Premium, or the free one not used yet),
+// red when not: a visitor (sign up) or a free account that used it (plans).
+function labAccess() {
+  if (state.guest || !state.me) return { ok: false, badge: "Premium", title: "Crea una cuenta para que te explique tu analítica" };
+  if (state.me.plan === "premium") return { ok: true, badge: "Premium", title: "Sube tu analítica en PDF: analíticas ilimitadas con Premium" };
+  const left = state.me.remaining?.lab ?? 0;
+  if (left > 0) return { ok: true, badge: `${left} gratis`, free: true, title: "Sube tu analítica en PDF: tienes 1 gratis" };
+  return { ok: false, badge: "Premium", title: "Ya has usado tu analítica gratis: hazte Premium para subir más" };
+}
+
+const labButtons = () => document.querySelectorAll(".lab-btn");  // header and chat
+
+function renderLabButton() {
+  const access = labAccess();
+  labButtons().forEach((btn) => {
+    btn.classList.toggle("on", access.ok);
+    btn.classList.toggle("off", !access.ok);
+    btn.title = access.title;
+    btn.setAttribute("aria-label", `Subir analítica en PDF. ${access.ok ? "Disponible" : "No disponible"}: ${access.title}`);
+    const badge = btn.querySelector(".lab-btn-badge");
+    badge.textContent = access.badge;
+    badge.classList.toggle("free", !!access.free);
+  });
+}
+
+labButtons().forEach((btn) => btn.addEventListener("click", onLabButton));
+
+function onLabButton() {
+  if (state.controller) return;
+  const access = labAccess();
+  if (access.ok) return $("lab-file").click();
+  // Not available: the button leads to Premium (a visitor creates the account when choosing a plan)
+  openPlans(state.guest || !state.me
+    ? "Hazte Premium y te explico todas tus analíticas, sin límite. Primero crearás tu cuenta."
+    : "Ya has usado tu analítica gratis. Con Premium puedes subir todas las que quieras.");
+}
+$("lab-file").addEventListener("change", async () => {
+  const file = $("lab-file").files[0];
+  $("lab-file").value = "";
+  if (!file) return;
+  await setAttachment(file);
+  if (state.pdf) sendLab(els.input.value.trim());  // one tap: pick the PDF and it is explained
+});
 
 function renderUsage() {
   const me = state.me;
@@ -654,6 +787,7 @@ function renderUsage() {
     : `<span class="u-full">${me.remaining.text}/${me.limits.text} gratis · ${me.remaining.image}/${me.limits.image} imagen</span>` +
       `<span class="u-short">${me.remaining.text}/${me.limits.text}</span>`;
   const sub = me.subscription;
+  renderLabButton();
   els.usage.title = premium
     ? (sub && !sub.cancel_at_period_end
         ? `Premium ${sub.plan_name.toLowerCase()} · próximo cobro el ${fmtDate(sub.current_period_end)} · ${me.email}`
@@ -664,7 +798,7 @@ function renderUsage() {
 function updateUsageFromHeaders(headers) {
   const text = headers.get("X-Usage-Text"), image = headers.get("X-Usage-Images");
   if (!state.me || text === null || text === "unlimited") return;
-  state.me.remaining = { text: Number(text), image: Number(image) };
+  state.me.remaining = { ...state.me.remaining, text: Number(text), image: Number(image) };  // keeps "lab"
   renderUsage();
 }
 
@@ -717,6 +851,12 @@ async function submitAuth(e) {
     els.authPassword.value = "";
     els.auth.hidden = true;
     await refreshMe();
+    if (state.pendingPlan) {
+      const plan = state.pendingPlan;
+      state.pendingPlan = null;
+      await checkout(plan, document.createElement("button"));
+      return;
+    }
     if (state.pending) {
       const { text, rows } = state.pending;
       state.pending = null;
@@ -824,6 +964,12 @@ async function billingRequest(path, body, btn) {
 }
 
 async function checkout(planId, btn) {
+  if (state.guest || !state.me) {
+    state.pendingPlan = planId;  // activated right after signing up (submitAuth)
+    els.plans.hidden = true;
+    showAuth("register", "Crea tu cuenta para activar Premium. Después se activa el plan que has elegido.");
+    return;
+  }
   const data = await billingRequest("billing/checkout", { plan_id: planId }, btn);
   if (!data) return;
   if (data.checkout_url) { location.href = data.checkout_url; return; }  // Stripe payment page
@@ -987,6 +1133,8 @@ async function newChat() {
   clearAttachment(true);
   els.messages.innerHTML = "";
   els.welcome.hidden = false;
+  const video = $("demo-video");
+  if (video && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) video.play().catch(() => {});
   els.input.value = ""; autoResize();
   els.input.focus();
 }
@@ -1045,6 +1193,22 @@ els.plans.addEventListener("click", (e) => { if (e.target === els.plans) els.pla
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { els.plans.hidden = true; els.auth.hidden = true; }
 });
+
+// Home video: muted autoplay; paused for people who prefer less motion; pause button
+(() => {
+  const video = $("demo-video"), toggle = $("video-toggle");
+  if (!video) return;
+  const sync = () => {
+    video.parentElement.classList.toggle("paused", video.paused);
+    toggle.textContent = video.paused ? "Reproducir" : "Pausar";
+    toggle.setAttribute("aria-label", video.paused ? "Reproducir el vídeo" : "Pausar el vídeo");
+  };
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) video.removeAttribute("autoplay"), video.pause();
+  toggle.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+  video.addEventListener("play", sync);
+  video.addEventListener("pause", sync);
+  sync();
+})();
 
 checkHealth();
 setInterval(checkHealth, 15000);
