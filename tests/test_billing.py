@@ -72,13 +72,30 @@ def at(*args):
 
 def test_free_questions():
     c, uid = new_client("free@example.com")
-    codes = [c.post("/chat/stream", json=ASK).status_code for _ in range(5)]
-    check("4 preguntas gratis y la 5.ª pide pagar", codes == [200, 200, 200, 200, 402])
-    clock["now"] += timedelta(days=3)  # not a daily limit: no new questions the next days
-    check("las preguntas gratis no vuelven al día siguiente", c.post("/chat/stream", json=ASK).status_code == 402)
-    check("/me cuenta las gratis en total", c.get("/me").json()["remaining"] == {"text": 0, "image": 1, "lab": 1})
+    me = c.get("/me").json()
+    check("al registrarse: 4 preguntas, 1 imagen y 1 analítica",
+          me["remaining"] == {"text": 4, "image": 1, "lab": 1} and me["text_period"] == "welcome")
+    codes = [c.post("/chat/stream", json=ASK) for _ in range(5)]
+    check("4 preguntas gratis y la 5.ª pide pagar", [r.status_code for r in codes] == [200, 200, 200, 200, 402])
+    check("ese día: el aviso dice que mañana habrá 1 gratis", "vuelve mañana" in codes[4].json()["detail"])
+    check("la 4.ª ya avisa por cabecera de que pasa al modo diario",
+          codes[3].headers.get("X-Usage-Text") == "0" and codes[3].headers.get("X-Usage-Period") == "day")
+    clock["now"] += timedelta(days=1)
+    me = c.get("/me").json()
+    check("al día siguiente: 1 pregunta gratis", me["remaining"]["text"] == 1 and me["text_period"] == "day"
+          and me["limits"]["text"] == 1)
+    r1, r2 = c.post("/chat/stream", json=ASK), c.post("/chat/stream", json=ASK)
+    check("al día siguiente: 1 respondida y la 2.ª pide pagar", r1.status_code == 200 and r2.status_code == 402)
+    check("aviso de la diaria gastada", "pregunta gratis de hoy" in r2.json()["detail"])
+    billing.refund(uid, "text")  # the model failed: the daily question comes back
+    check("si el modelo falla, se devuelve la pregunta diaria", c.get("/me").json()["remaining"]["text"] == 1)
+    check("y el paquete de bienvenida sigue gastado", auth.user_by_id(uid)["free_text_used"] == 4)
+    c.post("/chat/stream", json=ASK)
+    clock["now"] += timedelta(days=1)
+    check("otro día: otra pregunta gratis", c.post("/chat/stream", json=ASK).status_code == 200)
     r = c.post("/chat/stream", json={"message": "Tengo un dolor en el pecho que se me va al brazo izquierdo"})
     check("urgencia respondida aunque no queden preguntas", r.status_code == 200 and r.headers.get("X-Emergency") == "1")
+    check("imagen y analítica siguen sin usar", c.get("/me").json()["remaining"]["image"] == 1)
 
 
 def test_intervals():

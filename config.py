@@ -10,6 +10,8 @@ DB_PATH = Path(os.getenv("DB_PATH", ROOT / "data" / "app.db"))
 FREE_QUESTIONS = int(os.getenv("FREE_QUESTIONS", "4"))
 FREE_IMAGES = int(os.getenv("FREE_IMAGES", "1"))
 FREE_LABS = int(os.getenv("FREE_LABS", "1"))  # lab report PDFs explained
+# After the sign-up questions are used: this many free questions a day, from the next day on
+FREE_DAILY_QUESTIONS = int(os.getenv("FREE_DAILY_QUESTIONS", "1"))
 
 # Visitors without an account: questions before they are asked to sign up
 GUEST_QUESTIONS = int(os.getenv("GUEST_QUESTIONS", "1"))

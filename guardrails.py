@@ -35,7 +35,10 @@ RULES = [
      r"eres (ahora )?doctorlibre|jailbreak|\bdan\b mode",
      "No puedo hacer eso. " + ONLY_HEALTH),
     ("prescription",
-     r"\b(recetame|receteme|hazme una receta|dame una receta|prescribeme|me recetas)\b",
+     # "dame una receta de lentejas" is cooking (topic.py), "...de antibióticos" is not
+     r"\b(recetame|receteme|prescribeme|me recetas)\b|\b(hazme|dame) una receta\b"
+     r"(?!\s+de\s+(?!(un |una |el |la |los |las )?(medicamento|medicina|antibiotic|pastilla|farmac|ibuprofeno|"
+     r"paracetamol|jarabe|crema|pomada)))",
      "No puedo recetar medicamentos: solo un médico puede hacerlo, después de valorarte. "
      "Si crees que necesitas un tratamiento con receta, pide cita con tu médico de cabecera. "
      "Mientras tanto, puedo explicarte para qué sirve un medicamento o qué hacer con tus síntomas."),

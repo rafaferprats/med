@@ -119,6 +119,7 @@ body {
 .feature-icon.red { background: color-mix(in srgb, #dc2626 13%, transparent); color: #dc2626; }
 .steps { list-style: none; padding: 0; margin: 22px auto 0; display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 22px; font-size: 13.5px; color: var(--muted); }
 .steps li { display: flex; align-items: center; gap: 8px; }
+.steps .step-text { font-style: normal; }  /* one flex item, so the bold numbers keep normal spacing */
 .steps span {
   width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px;
   font-weight: 700; color: #fff; background: var(--user-bg);

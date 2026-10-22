@@ -1,6 +1,8 @@
 """Free questions, subscriptions and payments.
 
-Free accounts get FREE_QUESTIONS questions and FREE_IMAGES images in total. Premium is a
+Free accounts get FREE_QUESTIONS questions, FREE_IMAGES images and FREE_LABS lab reports when
+they sign up. When those questions run out the plans window opens; from the next day on there
+are FREE_DAILY_QUESTIONS free questions a day. Premium is a
 subscription charged every week, month or year: each paid period moves users.premium_until
 forward, so access always matches what has been paid.
 
@@ -14,7 +16,8 @@ from typing import Optional
 
 from fastapi import HTTPException
 
-from config import BILLING_MODE, FREE_IMAGES, FREE_LABS, FREE_QUESTIONS, GUEST_QUESTIONS, PLANS
+from config import (BILLING_MODE, FREE_DAILY_QUESTIONS, FREE_IMAGES, FREE_LABS, FREE_QUESTIONS, GUEST_QUESTIONS,
+                    PLANS)
 from db import connect
 
 LIMITS = {"text": FREE_QUESTIONS, "image": FREE_IMAGES, "lab": FREE_LABS}
@@ -83,17 +86,38 @@ def _subscription_status(user_id: int) -> Optional[dict]:
     }
 
 
+def _daily_used(user_id: int) -> int:
+    with connect() as conn:
+        row = conn.execute("SELECT free_daily_used FROM usage WHERE user_id = ? AND day = ?",
+                           (user_id, _today())).fetchone()
+    return row["free_daily_used"] if row else 0
+
+
+def text_quota(user: sqlite3.Row) -> tuple[int, int, str]:
+    """(left, limit, period) of free questions: "welcome" while the sign-up ones last, then
+    "day". The day the sign-up questions run out there is none left (the plans window opens)."""
+    left = FREE_QUESTIONS - user["free_text_used"]
+    if left > 0:
+        return left, FREE_QUESTIONS, "welcome"
+    if user["free_pack_done_on"] == _today():
+        return 0, FREE_DAILY_QUESTIONS, "day"
+    return max(0, FREE_DAILY_QUESTIONS - _daily_used(user["id"])), FREE_DAILY_QUESTIONS, "day"
+
+
 def status(user: sqlite3.Row) -> dict:
     user = _fresh(user)
     premium = is_premium(user)
     used = {k: user[USED[k]] for k in LIMITS}
+    text_left, text_limit, period = text_quota(user)
+    remaining = {k: max(0, LIMITS[k] - used[k]) for k in LIMITS} | {"text": text_left}
     return {
         "email": user["email"],
         "plan": "premium" if premium else "free",
         "premium_until": user["premium_until"] if premium else None,
         "usage": used,
-        "limits": None if premium else LIMITS,
-        "remaining": None if premium else {k: max(0, LIMITS[k] - used[k]) for k in LIMITS},
+        "limits": None if premium else LIMITS | {"text": text_limit},
+        "remaining": None if premium else remaining,
+        "text_period": None if premium else period,
         "subscription": _subscription_status(user["id"]),
         "billing_mode": BILLING_MODE,
     }
@@ -101,7 +125,11 @@ def status(user: sqlite3.Row) -> dict:
 
 def has_quota(user: sqlite3.Row, kind: str) -> bool:
     user = _fresh(user)
-    return is_premium(user) or user[USED[kind]] < LIMITS[kind]
+    if is_premium(user):
+        return True
+    if kind == "text":
+        return text_quota(user)[0] > 0
+    return user[USED[kind]] < LIMITS[kind]
 
 
 def consume(user: sqlite3.Row, kind: str) -> None:
@@ -116,20 +144,43 @@ def consume(user: sqlite3.Row, kind: str) -> None:
                      (user["id"], _today()))
         if is_premium(user):
             return
-        # Single statement: check and increment together, so parallel requests can't overshoot
+        # Single statements: check and increment together, so parallel requests can't overshoot
         used = USED[kind]
-        cur = conn.execute(f"UPDATE users SET {used} = {used} + 1 WHERE id = ? AND {used} < ?",
-                           (user["id"], LIMITS[kind]))
+        if kind == "text":
+            # Sign-up questions first; the one that uses the last of them records the day
+            cur = conn.execute(
+                "UPDATE users SET free_text_used = free_text_used + 1, free_pack_done_on = "
+                "CASE WHEN free_text_used + 1 >= ? THEN ? ELSE free_pack_done_on END "
+                "WHERE id = ? AND free_text_used < ?",
+                (FREE_QUESTIONS, _today(), user["id"], FREE_QUESTIONS))
+            if cur.rowcount == 0:
+                # Then the daily one, but not on the day the sign-up questions ran out
+                cur = conn.execute(
+                    "UPDATE usage SET free_daily_used = free_daily_used + 1 WHERE user_id = ? AND day = ? "
+                    "AND free_daily_used < ? AND (SELECT COALESCE(free_pack_done_on, '') FROM users "
+                    "WHERE id = ?) <> ?",
+                    (user["id"], _today(), FREE_DAILY_QUESTIONS, user["id"], _today()))
+        else:
+            cur = conn.execute(f"UPDATE users SET {used} = {used} + 1 WHERE id = ? AND {used} < ?",
+                               (user["id"], LIMITS[kind]))
         if cur.rowcount == 0:
             conn.rollback()  # the question isn't answered, so it isn't counted either
     if cur.rowcount == 0:
-        what = {"text": f"tus {LIMITS[kind]} preguntas gratis", "image": "tu imagen gratis",
-                "lab": "tu analítica gratis"}[kind]
-        raise HTTPException(
-            status_code=402,
-            detail=f"Ya has usado {what}. Hazte Premium para "
-                   + ("que te explique todas tus analíticas." if kind == "lab" else "seguir preguntando sin límite."),
-        )
+        raise HTTPException(status_code=402, detail=_no_quota_message(user, kind))
+
+
+def _no_quota_message(user: sqlite3.Row, kind: str) -> str:
+    if kind == "lab":
+        return "Ya has usado tu analítica gratis. Hazte Premium para que te explique todas tus analíticas."
+    if kind == "image":
+        return "Ya has usado tu imagen gratis. Hazte Premium para analizar todas las que quieras."
+    daily = f"{FREE_DAILY_QUESTIONS} pregunta gratis al día" if FREE_DAILY_QUESTIONS == 1 else \
+        f"{FREE_DAILY_QUESTIONS} preguntas gratis al día"
+    if FREE_QUESTIONS - user["free_text_used"] <= 0 and user["free_pack_done_on"] in (None, _today()) \
+            and _daily_used(user["id"]) == 0:
+        return (f"Ya has usado tus {FREE_QUESTIONS} preguntas gratis. Hazte Premium para seguir preguntando "
+                f"sin límite, o vuelve mañana: tendrás {daily}.")
+    return "Ya has usado tu pregunta gratis de hoy. Vuelve mañana o hazte Premium para preguntar sin límite."
 
 
 def refund(user_id: int, kind: str) -> None:
@@ -139,8 +190,18 @@ def refund(user_id: int, kind: str) -> None:
         conn.execute(f"UPDATE usage SET {col} = MAX(0, {col} - 1) WHERE user_id = ? AND day = ?",
                      (user_id, _today()))
         user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        if user and not is_premium(user):
-            conn.execute(f"UPDATE users SET {used} = MAX(0, {used} - 1) WHERE id = ?", (user_id,))
+        if not user or is_premium(user):
+            return
+        if kind == "text":
+            # The daily question is only used once the sign-up ones are gone: give that back first
+            cur = conn.execute("UPDATE usage SET free_daily_used = free_daily_used - 1 WHERE user_id = ? "
+                               "AND day = ? AND free_daily_used > 0", (user_id, _today()))
+            if cur.rowcount:
+                return
+            conn.execute("UPDATE users SET free_text_used = MAX(0, free_text_used - 1), "
+                         "free_pack_done_on = NULL WHERE id = ?", (user_id,))
+            return
+        conn.execute(f"UPDATE users SET {used} = MAX(0, {used} - 1) WHERE id = ?", (user_id,))
 
 
 def guest_consume(guest_id: str) -> bool:

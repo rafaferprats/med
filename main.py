@@ -1,5 +1,7 @@
 import asyncio
 import io
+import logging
+import time
 from contextlib import asynccontextmanager
 import secrets
 import uuid
@@ -17,11 +19,13 @@ import auth
 import billing
 import labs
 import pdf_guard
-from config import BILLING_MODE, COOKIE_NAME, FREE_IMAGES, FREE_QUESTIONS, GUEST_COOKIE_NAME, PLANS, TOKEN_DAYS
+from config import (BILLING_MODE, COOKIE_NAME, FREE_DAILY_QUESTIONS, FREE_IMAGES, FREE_LABS, FREE_QUESTIONS,
+                    GUEST_COOKIE_NAME, PLANS, TOKEN_DAYS)
 from db import init_db
 from questions import prepare, split_context
 from safety import EMERGENCY_MESSAGE, detect_emergency
 import security
+import topic
 import stripe_billing
 
 MODEL = "medgemma1.5:4b"
@@ -53,6 +57,9 @@ SYSTEM_PROMPT = {
         "Spanish from Spain (castellano), using 'tú', whatever language the question is in. "
         "Start directly with the answer. Never write English, JSON or code.\n"
         "Answer exactly the question that was asked.\n"
+        "You only help with human health. If the message is about anything else (computers, "
+        "homework, sports, cooking, money, general knowledge, pets...), do not answer it: reply "
+        "only 'Solo puedo ayudarte con dudas de salud.'\n"
         "For symptoms or a health problem, use exactly these headings:\n"
         "**Resumen:** 1-2 sentences.\n"
         "**Posibles causas:** possible causes.\n"
@@ -99,6 +106,8 @@ IMAGE_SYSTEM_PROMPT = {
         "'< X' means the value should be below X and '> X' means it should be above X.\n"
         "If any finding could be urgent, say clearly at the start that the person "
         "should go to the emergency department now.\n"
+        "If the image has nothing to do with health (no person, body part, skin, medical image, "
+        "lab report or medicine), say only that you can only analyse health images.\n"
         "You do not replace a healthcare professional."
     ),
 }
@@ -236,6 +245,8 @@ def usage_headers(user_id: int) -> dict:
         return {"X-Usage-Text": "unlimited", "X-Usage-Images": "unlimited"}
     return {
         "X-Usage-Text": str(status["remaining"]["text"]),
+        "X-Usage-Text-Limit": str(status["limits"]["text"]),
+        "X-Usage-Period": status["text_period"],  # "welcome" (sign-up questions) or "day"
         "X-Usage-Images": str(status["remaining"]["image"]),
     }
 
@@ -435,7 +446,8 @@ async def plans():
     public = ("name", "price_eur", "interval", "best_value")
     return {"billing_mode": BILLING_MODE,
             "plans": {pid: {k: p[k] for k in public if k in p} for pid, p in PLANS.items()},
-            "free": {"text": FREE_QUESTIONS, "image": FREE_IMAGES}}
+            "free": {"text": FREE_QUESTIONS, "image": FREE_IMAGES, "lab": FREE_LABS,
+                     "daily": FREE_DAILY_QUESTIONS}}
 
 
 # Plain "def": the Stripe calls block, so FastAPI runs these in a worker thread
@@ -486,6 +498,26 @@ async def chat_endpoint(req: ChatRequest, request: Request, user=Depends(auth.cu
     return {"session_id": sid, "response": answer, "emergency": emergency}
 
 
+async def on_topic(question: str, history: list[dict]) -> Optional[str]:
+    """None if the question is about health; otherwise the fixed answer (topic.py). Rules
+    first; only the unsure ones are asked to the model, in one word. If that call fails the
+    question passes: the system prompt also keeps the model on health."""
+    kind, answer = topic.classify(question, topic.health_conversation(history))
+    if kind != "unsure":
+        return answer if kind == "other" else None
+    try:
+        resp = await asyncio.wait_for(client.chat(
+            model=MODEL,
+            messages=[{"role": "system", "content": topic.CLASSIFIER_PROMPT}, {"role": "user", "content": question}],
+            options={"temperature": 0, "num_predict": 600, "num_ctx": 2048},
+        ), timeout=25)
+        verdict = clean(resp.message.content).upper()
+    except Exception as e:
+        print(f"[topic] classifier failed, question allowed: {e!r}")
+        return None
+    return topic.OFF_TOPIC if verdict.startswith("OTRO") else None
+
+
 def fixed_response(sid: str, history: list[dict], message: str, answer: str,
                    headers: Optional[dict] = None) -> StreamingResponse:
     """An answer written in code instead of by the model (it is not counted). X-Fixed-Answer
@@ -499,8 +531,8 @@ def fixed_response(sid: str, history: list[dict], message: str, answer: str,
 
 
 SIGNUP_MESSAGE = (
-    f"Crea una cuenta gratis para seguir preguntando: {FREE_QUESTIONS} preguntas y "
-    f"{FREE_IMAGES} imagen gratis, sin tarjeta."
+    f"Crea una cuenta gratis para seguir preguntando: {FREE_QUESTIONS} preguntas, {FREE_IMAGES} imagen y "
+    f"{FREE_LABS} analítica gratis, y después {FREE_DAILY_QUESTIONS} pregunta gratis al día. Sin tarjeta."
 )
 
 
@@ -558,6 +590,15 @@ async def chat_stream(req: ChatRequest, request: Request, user=Depends(auth.opti
         sid, history = get_history(req.session_id, owner)
         headers = usage_headers(user["id"]) if user else {}
         return fixed_response(sid, history, prep.entry["content"], prep.fixed_answer, headers)
+    # Only health questions reach the model (topic.py): anything else gets a fixed answer, not counted
+    owner = user["id"] if user else f"guest:{request.cookies.get(GUEST_COOKIE_NAME, '')}"
+    previous = sessions.get(req.session_id or "")
+    previous = previous["history"] if previous and previous["user_id"] == owner else []
+    off_topic = await on_topic(question, previous)
+    if off_topic:
+        sid, history = get_history(req.session_id, owner)
+        headers = usage_headers(user["id"]) if user else {}
+        return fixed_response(sid, history, question, off_topic, headers)
     if user is None:
         return guest_chat(req, request, prep.entry)
     security.check_question_rate(request, f"user:{user['id']}")
@@ -715,6 +756,17 @@ async def delete_session(session_id: str, user=Depends(auth.current_user)):
     return {"deleted": session_id}
 
 
+# Requests log for chat, images and lab reports: time, route, result, size and duration (never the
+# content of messages or files). Also the full error when something fails. data/ is not in git.
+Path(__file__).parent.joinpath("data").mkdir(exist_ok=True)
+request_log = logging.getLogger("medapp.requests")
+_handler = logging.FileHandler(Path(__file__).parent / "data" / "server.log")
+_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+request_log.addHandler(_handler)
+request_log.setLevel(logging.INFO)
+LOGGED = ("/chat", "/labs", "/auth", "/billing")
+
+
 @app.middleware("http")
 async def revalidate_static(request: Request, call_next):
     """Makes browsers check for a newer page, script or style on every load, so an
@@ -727,6 +779,25 @@ async def revalidate_static(request: Request, call_next):
     response.headers.update(security.SECURITY_HEADERS)
     if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css", ".svg")):
         response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+# Declared last so it runs first and also sees the requests refused above (413)
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith(LOGGED):
+        return await call_next(request)
+    t0 = time.monotonic()
+    size = request.headers.get("content-length", "-")
+    agent = "movil" if "Mobile" in request.headers.get("user-agent", "") else "pc"
+    try:
+        response = await call_next(request)
+    except Exception:
+        request_log.exception(f"{request.method} {path} ERROR size={size} {agent}")
+        raise
+    request_log.info(f"{request.method} {path} {response.status_code} size={size} "
+                     f"{(time.monotonic() - t0) * 1000:.0f}ms {agent}")
     return response
 
 

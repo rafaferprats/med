@@ -17,14 +17,45 @@ const els = {
   loginBtn: $("login-btn"), signupBtn: $("signup-btn"), authClose: $("auth-close"),
 };
 
-const MAX_IMAGE_MB = 10;
+const MAX_IMAGE_MB = 10;      // what the server accepts (PDFs, and images after shrinking)
+const MAX_PHOTO_MB = 40;      // a photo before shrinking it in the browser
+const PHOTO_MAX_SIDE = 1600;  // px; the server reduces images to 1024 px anyway
+
+// Phone photos weigh 3-12 MB: sent as they are, they take seconds on a home wifi and a hiccup
+// meant "Failed to fetch". They are shrunk here first (JPEG, max 1600 px, right way up): a few
+// hundred KB, sent in an instant. If the browser can't decode the file, it is sent unchanged.
+async function shrinkPhoto(file) {
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size < 1.5 * 1024 * 1024 && file.type === "image/jpeg") return file;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const blob = await new Promise((done) => canvas.toBlob(done, "image/jpeg", 0.88));
+    if (!blob) return file;
+    return new File([blob], (file.name || "foto").replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
+// Network errors ("Failed to fetch", "Load failed"...) in words a person understands
+function isNetworkError(err) {
+  return err instanceof TypeError && /fetch|load failed|network/i.test(err.message);
+}
+const NETWORK_MESSAGE = "Se ha perdido la conexión con el servidor. Comprueba la wifi o los datos y vuelve a intentarlo.";
 // Free questions and images a new account gets in total; updated from the server (/plans)
-const FREE = { text: 4, image: 1 };
+const FREE = { text: 4, image: 1, lab: 1, daily: 1 };
 fetch("plans").then((r) => r.json()).then((data) => {
   if (!data.free) return;
   Object.assign(FREE, data.free);
   document.querySelectorAll(".free-text").forEach((el) => (el.textContent = FREE.text));
   document.querySelectorAll(".free-image").forEach((el) => (el.textContent = FREE.image));
+  document.querySelectorAll(".free-lab").forEach((el) => (el.textContent = FREE.lab));
+  document.querySelectorAll(".free-daily").forEach((el) => (el.textContent = FREE.daily));
 }).catch(() => {});
 const state = {
   sessionId: null, image: null, imageUrl: null, controller: null, me: null, authMode: "login",
@@ -423,7 +454,9 @@ async function send(text) {
       const fd = new FormData();
       fd.append("message", outgoing);
       fd.append("session_id", state.sessionId || "");
-      fd.append("image", image, image.name || "image.png");
+      const photo = await shrinkPhoto(image);
+      if (photo.size > MAX_IMAGE_MB * 1024 * 1024) throw new Error(`La imagen ocupa más de ${MAX_IMAGE_MB} MB.`);
+      fd.append("image", photo, photo.name || "image.jpg");
       resp = await fetch("chat/image", { method: "POST", body: fd, signal: state.controller.signal });
     } else {
       resp = await fetch("chat/stream", {
@@ -460,7 +493,7 @@ async function send(text) {
     if (!answer.trim()) throw new Error("El modelo no ha devuelto ninguna respuesta.");
     showAnswer(msg.content, answer, ctxSnapshot, { trusted });
     if (image) addImageNotes(msg, answer);
-    if (guestAnswer) addSignupCta(msg, `¿Te ha servido? Crea una cuenta gratis para seguir preguntando: ${FREE.text} preguntas y ${FREE.image} imagen gratis.`);
+    if (guestAnswer) addSignupCta(msg, `¿Te ha servido? Crea una cuenta gratis para seguir preguntando: ${FREE.text} preguntas, ${FREE.image} imagen y ${FREE.lab} analítica gratis.`);
   } catch (err) {
     if (err.name === "AbortError") {
       note = "detenida";
@@ -475,7 +508,7 @@ async function send(text) {
       const row = msg.bubble.closest(".msg");
       state.pending = { text, rows: [row.previousElementSibling, row] };
       msg.content.innerHTML = "<p>Ya has usado tu pregunta gratis. <strong>Crea una cuenta gratis</strong> y te respondo a esta pregunta al momento.</p>";
-      addSignupCta(msg, `${FREE.text} preguntas y ${FREE.image} imagen gratis, sin tarjeta.`);
+      addSignupCta(msg, `${FREE.text} preguntas, ${FREE.image} imagen y ${FREE.lab} analítica gratis, sin tarjeta.`);
       showAuth("register", err.message);
     } else if (err.status === 401) {
       msg.content.textContent = "Tu sesión ha caducado. Vuelve a entrar para continuar.";
@@ -483,7 +516,7 @@ async function send(text) {
       showAuth("login");
     } else {
       msg.bubble.classList.add("error");
-      msg.content.textContent = `Algo ha fallado: ${err.message}. ¿Están en marcha el servidor y Ollama?`;
+      msg.content.textContent = isNetworkError(err) ? NETWORK_MESSAGE : `Algo ha fallado: ${err.message}. Inténtalo de nuevo en un momento.`;
       answer = "";
     }
   } finally {
@@ -701,7 +734,7 @@ async function sendLab(text) {
         <p>${escapeHtml(err.message)}</p></div>`;
     } else {
       msg.bubble.classList.add("error");
-      msg.content.textContent = `Algo ha fallado: ${err.message}. Inténtalo de nuevo en un momento.`;
+      msg.content.textContent = isNetworkError(err) ? NETWORK_MESSAGE : `Algo ha fallado: ${err.message}. Inténtalo de nuevo en un momento.`;
     }
   } finally {
     if (summary || note) showMeta(msg, summary, (performance.now() - t0) / 1000, note);
@@ -722,7 +755,7 @@ function enterGuestMode() {
   fetch("guest", { cache: "no-store" }).then((r) => r.json()).then(({ remaining }) => {
     if (remaining === 0) {
       $("hero-sub").innerHTML = "Describe un síntoma, pregunta por un medicamento o comparte una imagen médica. " +
-        `<strong>Ya has usado tu pregunta gratis:</strong> crea una cuenta gratis para seguir (${FREE.text} preguntas gratis).`;
+        `<strong>Ya has usado tu pregunta gratis:</strong> crea una cuenta gratis para seguir (${FREE.text} preguntas, ${FREE.image} imagen y ${FREE.lab} analítica).`;
     }
   }).catch(() => {});
 }
@@ -784,7 +817,7 @@ function renderUsage() {
   els.usage.className = "usage" + (premium ? " premium" : me.remaining.text === 0 ? " empty" : "");
   els.usage.innerHTML = premium
     ? "Premium"
-    : `<span class="u-full">${me.remaining.text}/${me.limits.text} gratis · ${me.remaining.image}/${me.limits.image} imagen</span>` +
+    : `<span class="u-full">${me.remaining.text}/${me.limits.text} ${me.text_period === "day" ? "hoy" : "gratis"} · ${me.remaining.image}/${me.limits.image} imagen</span>` +
       `<span class="u-short">${me.remaining.text}/${me.limits.text}</span>`;
   const sub = me.subscription;
   renderLabButton();
@@ -792,13 +825,18 @@ function renderUsage() {
     ? (sub && !sub.cancel_at_period_end
         ? `Premium ${sub.plan_name.toLowerCase()} · próximo cobro el ${fmtDate(sub.current_period_end)} · ${me.email}`
         : `Premium hasta el ${fmtDate(me.premium_until)} · ${me.email}`)
-    : `Preguntas gratis que te quedan · ${me.email}`;
+    : me.text_period === "day"
+      ? `Preguntas gratis de hoy (${FREE.daily} al día) · ${me.email}`
+      : `Preguntas gratis de bienvenida · después, ${FREE.daily} al día · ${me.email}`;
 }
 
 function updateUsageFromHeaders(headers) {
   const text = headers.get("X-Usage-Text"), image = headers.get("X-Usage-Images");
   if (!state.me || text === null || text === "unlimited") return;
   state.me.remaining = { ...state.me.remaining, text: Number(text), image: Number(image) };  // keeps "lab"
+  const period = headers.get("X-Usage-Period"), limit = headers.get("X-Usage-Text-Limit");
+  if (period) state.me.text_period = period;
+  if (limit && state.me.limits) state.me.limits = { ...state.me.limits, text: Number(limit) };
   renderUsage();
 }
 
@@ -824,7 +862,7 @@ function setAuthMode(mode) {
   els.authTitle.textContent = login ? "Hola de nuevo" : "Crea tu cuenta";
   els.authSub.textContent = login
     ? "Entra para seguir preguntando tus dudas de salud."
-    : `${FREE.text} preguntas y ${FREE.image} imagen gratis al registrarte. Sin tarjeta.`;
+    : `${FREE.text} preguntas, ${FREE.image} imagen y ${FREE.lab} analítica gratis al registrarte, y después ${FREE.daily} pregunta gratis al día. Sin tarjeta.`;
   els.authSubmit.textContent = login ? "Entrar" : "Crear cuenta";
   els.authPassword.autocomplete = login ? "current-password" : "new-password";
   els.authError.hidden = true;
@@ -1082,8 +1120,9 @@ async function setAttachment(file) {
     alert("Este archivo no es un PDF válido. Descarga la analítica de nuevo en PDF.");
     return;
   }
-  if (file.size > MAX_IMAGE_MB * 1024 * 1024) {
-    alert(`${pdf ? "El PDF" : "La imagen"} ocupa más de ${MAX_IMAGE_MB} MB.`);
+  const limit = pdf ? MAX_IMAGE_MB : MAX_PHOTO_MB;  // photos are shrunk before sending
+  if (file.size > limit * 1024 * 1024) {
+    alert(`${pdf ? "El PDF" : "La imagen"} ocupa más de ${limit} MB.`);
     return;
   }
   clearAttachment(true);
@@ -1160,7 +1199,9 @@ els.input.addEventListener("paste", (e) => {
   if (item) { e.preventDefault(); setAttachment(item.getAsFile()); }
 });
 els.attach.addEventListener("click", () => {
-  if (state.guest) showAuth("register", `Crea una cuenta gratis para analizar imágenes y analíticas.`);
+  // Photos only: with PDFs in the same picker, Android opens the file manager instead of the
+  // gallery or the camera. PDFs go through the "Analítica" buttons.
+  if (state.guest) showAuth("register", `Crea una cuenta gratis y analizo tu imagen: ${FREE.image} imagen gratis al registrarte.`);
   else els.file.click();
 });
 els.file.addEventListener("change", () => setAttachment(els.file.files[0]));

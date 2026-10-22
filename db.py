@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS usage (
     text_count INTEGER NOT NULL DEFAULT 0,
     image_count INTEGER NOT NULL DEFAULT 0,
     lab_count INTEGER NOT NULL DEFAULT 0,
+    free_daily_used INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, day)
 );
 -- One subscription per user. Access to Premium comes from users.premium_until, which is
@@ -74,8 +75,13 @@ def init_db() -> None:
                              "FROM usage WHERE usage.user_id = users.id)")
         if "free_labs_used" not in columns:
             conn.execute("ALTER TABLE users ADD COLUMN free_labs_used INTEGER NOT NULL DEFAULT 0")
-        if "lab_count" not in {row["name"] for row in conn.execute("PRAGMA table_info(usage)")}:
+        if "free_pack_done_on" not in columns:  # day the sign-up questions ran out
+            conn.execute("ALTER TABLE users ADD COLUMN free_pack_done_on TEXT")
+        usage_columns = {row["name"] for row in conn.execute("PRAGMA table_info(usage)")}
+        if "lab_count" not in usage_columns:
             conn.execute("ALTER TABLE usage ADD COLUMN lab_count INTEGER NOT NULL DEFAULT 0")
+        if "free_daily_used" not in usage_columns:  # the daily free question
+            conn.execute("ALTER TABLE usage ADD COLUMN free_daily_used INTEGER NOT NULL DEFAULT 0")
 
 
 @contextmanager

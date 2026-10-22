@@ -87,7 +87,7 @@
         <ol class="steps">
           <li><span>1</span>Haz una pregunta gratis</li>
           <li><span>2</span>Recibe una respuesta clara y ordenada</li>
-          <li><span>3</span>Regístrate y llévate <b class="free-text">4</b> preguntas gratis</li>
+          <li><span>3</span><em class="step-text">Regístrate: <b class="free-text">4</b> preguntas, <b class="free-image">1</b> imagen y <b class="free-lab">1</b> analítica gratis</em></li>
         </ol>
       </section>
       <div class="messages" id="messages" aria-live="polite"></div>
@@ -129,10 +129,10 @@
           <small>Se guarda solo en este navegador y se envía con tus preguntas. No se guarda en la base de datos del servidor.</small>
         </div>
         <div class="composer-row">
-          <button type="button" class="icon-btn" id="attach" title="Adjuntar imagen o analítica en PDF" aria-label="Adjuntar imagen o analítica en PDF">
+          <button type="button" class="icon-btn" id="attach" title="Adjuntar una foto o imagen médica" aria-label="Adjuntar una foto o imagen médica">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.5l-8.5 8.5a5 5 0 01-7-7L14 5.5a3.5 3.5 0 015 5L10.5 19a2 2 0 01-3-3L15 8.5"/></svg>
           </button>
-          <input type="file" id="file" accept="image/png,image/jpeg,image/webp,application/pdf,.pdf" hidden>
+          <input type="file" id="file" accept="image/png,image/jpeg,image/webp" hidden>
           <textarea id="input" rows="1" placeholder="Escribe tu duda de salud…" autocomplete="off"></textarea>
           <button type="submit" class="send-btn" id="send" title="Enviar" aria-label="Enviar">
             <svg viewBox="0 0 24 24" aria-hidden="true" class="i-send"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -164,7 +164,7 @@
       <label>Contraseña<input type="password" id="auth-password" autocomplete="current-password" minlength="8" required></label>
       <p class="form-error" id="auth-error" hidden></p>
       <button type="submit" class="btn primary" id="auth-submit">Entrar</button>
-      <p class="fineprint">Al registrarte: <span class="free-text">4</span> preguntas y <span class="free-image">1</span> imagen gratis. Solo informativo: no sustituye a un profesional sanitario.</p>
+      <p class="fineprint">Al registrarte: <span class="free-text">4</span> preguntas, <span class="free-image">1</span> imagen y <span class="free-lab">1</span> analítica gratis. Después, <span class="free-daily">1</span> pregunta gratis al día. Solo informativo: no sustituye a un profesional sanitario.</p>
     </form>
   </div>
 
