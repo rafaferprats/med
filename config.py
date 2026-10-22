@@ -1,0 +1,41 @@
+"""App settings. Every value can be overridden with an environment variable."""
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+
+DB_PATH = Path(os.getenv("DB_PATH", ROOT / "data" / "app.db"))
+
+# Free plan: questions and images an account gets in total when it signs up (not per day)
+FREE_QUESTIONS = int(os.getenv("FREE_QUESTIONS", "4"))
+FREE_IMAGES = int(os.getenv("FREE_IMAGES", "1"))
+FREE_LABS = int(os.getenv("FREE_LABS", "1"))  # lab report PDFs explained
+
+# Visitors without an account: questions before they are asked to sign up
+GUEST_QUESTIONS = int(os.getenv("GUEST_QUESTIONS", "1"))
+GUEST_COOKIE_NAME = "medapp_guest"
+
+# "test" simulates the payments (renewals included) without charging, "stripe" charges
+# with Stripe, "off" disables checkout
+BILLING_MODE = os.getenv("BILLING_MODE", "test")
+
+# Stripe (only with BILLING_MODE=stripe). Each plan needs a recurring Price created in Stripe
+# with the same amount and interval as below.
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# Public address of the app, where Stripe sends the user back after paying
+PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8000").rstrip("/")
+
+# interval: how often the subscription is charged (week, month or year)
+PLANS = {
+    "weekly": {"name": "Semanal", "price_eur": 2.99, "interval": "week",
+               "stripe_price": os.getenv("STRIPE_PRICE_WEEKLY", "")},
+    "monthly": {"name": "Mensual", "price_eur": 7.99, "interval": "month",
+                "stripe_price": os.getenv("STRIPE_PRICE_MONTHLY", "")},
+    "yearly": {"name": "Anual", "price_eur": 49.99, "interval": "year", "best_value": True,
+               "stripe_price": os.getenv("STRIPE_PRICE_YEARLY", "")},
+}
+
+TOKEN_DAYS = 30
+COOKIE_NAME = "medapp_session"
+MIN_PASSWORD_LENGTH = 8

@@ -1,0 +1,85 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Length 2282 >>
+stream
+BT /F2 11 Tf 50 800 Td (LABORATORIO DE ANÁLISIS CLÍNICOS \(DATOS DE PRUEBA\)) Tj ET
+BT /F1 9 Tf 50 786 Td (Paciente: Persona de Prueba        DNI: 00000000T        NHC: 123456) Tj ET
+BT /F1 9 Tf 50 772 Td (Fecha de nacimiento: 12/05/1980        Edad: 45 años        Sexo: Hombre) Tj ET
+BT /F1 9 Tf 50 758 Td (Nº petición: 2026-004512        Fecha de extracción: 14/10/2026 08:32) Tj ET
+BT /F1 9 Tf 50 744 Td (Médico solicitante: Dra. Ejemplo        Centro: C.S. Ejemplo, Tel. 912 345 678) Tj ET
+BT /F2 9 Tf 50 720 Td (Prueba) Tj ET
+BT /F2 9 Tf 235 720 Td (Resultado) Tj ET
+BT /F2 9 Tf 305 720 Td (Unidades) Tj ET
+BT /F2 9 Tf 395 720 Td (Valores de referencia) Tj ET
+BT /F2 10 Tf 50 696 Td (BIOQUÍMICA) Tj ET
+BT /F1 9 Tf 50 680 Td (Glucosa) Tj ET
+BT /F1 9 Tf 235 680 Td (96) Tj ET
+BT /F1 9 Tf 305 680 Td (mg/dL) Tj ET
+BT /F1 9 Tf 395 680 Td (70 - 110) Tj ET
+BT /F1 9 Tf 50 666 Td (Urea) Tj ET
+BT /F1 9 Tf 235 666 Td (34) Tj ET
+BT /F1 9 Tf 305 666 Td (mg/dL) Tj ET
+BT /F1 9 Tf 395 666 Td (10 - 50) Tj ET
+BT /F1 9 Tf 50 652 Td (Creatinina) Tj ET
+BT /F1 9 Tf 235 652 Td (0,95) Tj ET
+BT /F1 9 Tf 305 652 Td (mg/dL) Tj ET
+BT /F1 9 Tf 395 652 Td (0,70 - 1,30) Tj ET
+BT /F2 10 Tf 50 632 Td (SISTEMÁTICO DE ORINA) Tj ET
+BT /F1 9 Tf 50 616 Td (pH) Tj ET
+BT /F1 9 Tf 235 616 Td (6,0) Tj ET
+BT /F1 9 Tf 395 616 Td (5,0 - 8,0) Tj ET
+BT /F1 9 Tf 50 602 Td (Densidad) Tj ET
+BT /F1 9 Tf 235 602 Td (1.025) Tj ET
+BT /F1 9 Tf 395 602 Td (1.005 - 1.030) Tj ET
+BT /F1 9 Tf 50 588 Td (Glucosa) Tj ET
+BT /F1 9 Tf 235 588 Td (Negativo) Tj ET
+BT /F1 9 Tf 395 588 Td (Negativo) Tj ET
+BT /F1 9 Tf 50 574 Td (Proteínas) Tj ET
+BT /F1 9 Tf 235 574 Td (Indicios) Tj ET
+BT /F1 9 Tf 395 574 Td (Negativo) Tj ET
+BT /F1 9 Tf 50 560 Td (Leucocitos) Tj ET
+BT /F1 9 Tf 235 560 Td (Positivo \(+++\)) Tj ET
+BT /F1 9 Tf 395 560 Td (Negativo) Tj ET
+BT /F1 9 Tf 50 546 Td (Nitritos) Tj ET
+BT /F1 9 Tf 235 546 Td (Positivo) Tj ET
+BT /F1 9 Tf 395 546 Td (Negativo) Tj ET
+BT /F1 9 Tf 50 532 Td (Hematíes) Tj ET
+BT /F1 9 Tf 235 532 Td (Negativo) Tj ET
+BT /F1 9 Tf 395 532 Td (Negativo) Tj ET
+BT /F1 9 Tf 50 518 Td (Cuerpos cetónicos) Tj ET
+BT /F1 9 Tf 235 518 Td (Negativo) Tj ET
+BT /F1 9 Tf 395 518 Td (Negativo) Tj ET
+BT /F1 8 Tf 50 40 Td (Página 1 de 1. Valores marcados con * o H/L fuera del intervalo de referencia.) Tj ET
+
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 5 0 R /MediaBox [0 0 595 842] /Contents 3 0 R /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> >>
+endobj
+5 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+6 0 obj
+<< /Type /Catalog /Pages 5 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000112 00000 n 
+0000000214 00000 n 
+0000002548 00000 n 
+0000002684 00000 n 
+0000002741 00000 n 
+trailer
+<< /Size 7 /Root 6 0 R >>
+startxref
+2790
+%%EOF

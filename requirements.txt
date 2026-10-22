@@ -1,0 +1,12 @@
+# API and web interface
+fastapi>=0.115
+uvicorn>=0.30
+python-multipart>=0.0.9
+pydantic>=2.7
+ollama>=0.4
+pillow>=10.0
+pypdf>=5.0               # lab report PDFs
+
+# Optional Streamlit interface (app.py)
+streamlit>=1.40
+requests>=2.31

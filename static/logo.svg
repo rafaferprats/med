@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="MedGemma local">
+  <defs>
+    <clipPath id="tile"><rect width="64" height="64" rx="16"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1e3a8a"/>
+    <!-- neck, shoulders and stethoscope -->
+    <rect x="28" y="40" width="8" height="10" fill="#94a3b8"/>
+    <path d="M12 66q2-17 20-17q18 0 20 17z" fill="#fff"/>
+    <path d="M24 50q0 9 8 9q8 0 8-9" stroke="#14b8a6" stroke-width="2.2" fill="none"/>
+    <circle cx="32" cy="59.5" r="2.4" fill="#14b8a6"/>
+    <path d="M44 54.5v5M41.5 57h5" stroke="#ef4444" stroke-width="2" stroke-linecap="round"/>
+    <!-- hair bun and ear pods -->
+    <circle cx="32" cy="11" r="5.5" fill="#14b8a6"/>
+    <rect x="26" y="14" width="12" height="3" rx="1.5" fill="#0d9488"/>
+    <circle cx="16" cy="28" r="4" fill="#14b8a6"/>
+    <circle cx="48" cy="28" r="4" fill="#14b8a6"/>
+    <!-- head and face screen -->
+    <rect x="17" y="14" width="30" height="28" rx="12" fill="#fff"/>
+    <rect x="21" y="19" width="22" height="16" rx="7" fill="#0f172a"/>
+    <circle cx="27" cy="27" r="2.6" fill="#5eead4"/>
+    <circle cx="37" cy="27" r="2.6" fill="#5eead4"/>
+    <path d="M24.4 25.6l-1.7-1.3M39.6 25.6l1.7-1.3" stroke="#5eead4" stroke-width="1.5" stroke-linecap="round"/>
+    <path d="M29.5 31.5q2.5 1.8 5 0" stroke="#5eead4" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+    <circle cx="22" cy="38.5" r="1.8" fill="#f9a8d4"/>
+    <circle cx="42" cy="38.5" r="1.8" fill="#f9a8d4"/>
+  </g>
+</svg>

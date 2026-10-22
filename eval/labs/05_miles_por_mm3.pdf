@@ -1,0 +1,85 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Length 2295 >>
+stream
+BT /F2 11 Tf 50 800 Td (LABORATORIO DE ANÁLISIS CLÍNICOS \(DATOS DE PRUEBA\)) Tj ET
+BT /F1 9 Tf 50 786 Td (Paciente: Persona de Prueba        DNI: 00000000T        NHC: 123456) Tj ET
+BT /F1 9 Tf 50 772 Td (Fecha de nacimiento: 12/05/1980        Edad: 45 años        Sexo: Mujer) Tj ET
+BT /F1 9 Tf 50 758 Td (Nº petición: 2026-004512        Fecha de extracción: 14/10/2026 08:32) Tj ET
+BT /F1 9 Tf 50 744 Td (Médico solicitante: Dra. Ejemplo        Centro: C.S. Ejemplo, Tel. 912 345 678) Tj ET
+BT /F2 9 Tf 50 720 Td (Prueba) Tj ET
+BT /F2 9 Tf 235 720 Td (Resultado) Tj ET
+BT /F2 9 Tf 305 720 Td (Unidades) Tj ET
+BT /F2 9 Tf 395 720 Td (Valores de referencia) Tj ET
+BT /F2 10 Tf 50 696 Td (HEMOGRAMA) Tj ET
+BT /F1 9 Tf 50 680 Td (Hematíes) Tj ET
+BT /F1 9 Tf 235 680 Td (4.350.000) Tj ET
+BT /F1 9 Tf 305 680 Td (/mm3) Tj ET
+BT /F1 9 Tf 395 680 Td (4.000.000 - 5.200.000) Tj ET
+BT /F1 9 Tf 50 666 Td (Hemoglobina) Tj ET
+BT /F1 9 Tf 235 666 Td (12,8) Tj ET
+BT /F1 9 Tf 305 666 Td (g/dL) Tj ET
+BT /F1 9 Tf 395 666 Td (12,0 - 16,0) Tj ET
+BT /F1 9 Tf 50 652 Td (Leucocitos) Tj ET
+BT /F1 9 Tf 235 652 Td (3.200 *) Tj ET
+BT /F1 9 Tf 305 652 Td (/mm3) Tj ET
+BT /F1 9 Tf 395 652 Td (4.000 - 11.000) Tj ET
+BT /F1 9 Tf 50 638 Td (Neutrófilos) Tj ET
+BT /F1 9 Tf 235 638 Td (1.100 *) Tj ET
+BT /F1 9 Tf 305 638 Td (/mm3) Tj ET
+BT /F1 9 Tf 395 638 Td (2.000 - 7.500) Tj ET
+BT /F1 9 Tf 50 624 Td (Linfocitos) Tj ET
+BT /F1 9 Tf 235 624 Td (1.800) Tj ET
+BT /F1 9 Tf 305 624 Td (/mm3) Tj ET
+BT /F1 9 Tf 395 624 Td (1.000 - 4.000) Tj ET
+BT /F1 9 Tf 50 610 Td (Plaquetas) Tj ET
+BT /F1 9 Tf 235 610 Td (245.000) Tj ET
+BT /F1 9 Tf 305 610 Td (/mm3) Tj ET
+BT /F1 9 Tf 395 610 Td (150.000 - 400.000) Tj ET
+BT /F2 10 Tf 50 590 Td (BIOQUÍMICA) Tj ET
+BT /F1 9 Tf 50 574 Td (Glucosa) Tj ET
+BT /F1 9 Tf 235 574 Td (88) Tj ET
+BT /F1 9 Tf 305 574 Td (mg/dL) Tj ET
+BT /F1 9 Tf 395 574 Td (70 - 110) Tj ET
+BT /F1 9 Tf 50 560 Td (Vitamina B12) Tj ET
+BT /F1 9 Tf 235 560 Td (180 *) Tj ET
+BT /F1 9 Tf 305 560 Td (pg/mL) Tj ET
+BT /F1 9 Tf 395 560 Td (200 - 900) Tj ET
+BT /F1 9 Tf 50 546 Td (Ácido fólico) Tj ET
+BT /F1 9 Tf 235 546 Td (2,1 *) Tj ET
+BT /F1 9 Tf 305 546 Td (ng/mL) Tj ET
+BT /F1 9 Tf 395 546 Td (3,0 - 20,0) Tj ET
+BT /F1 8 Tf 50 40 Td (Página 1 de 1. Valores marcados con * o H/L fuera del intervalo de referencia.) Tj ET
+
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 5 0 R /MediaBox [0 0 595 842] /Contents 3 0 R /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> >>
+endobj
+5 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+6 0 obj
+<< /Type /Catalog /Pages 5 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000112 00000 n 
+0000000214 00000 n 
+0000002561 00000 n 
+0000002697 00000 n 
+0000002754 00000 n 
+trailer
+<< /Size 7 /Root 6 0 R >>
+startxref
+2803
+%%EOF

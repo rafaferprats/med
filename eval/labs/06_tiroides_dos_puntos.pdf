@@ -1,0 +1,51 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Length 1149 >>
+stream
+BT /F2 11 Tf 50 800 Td (LABORATORIO DE ANÁLISIS CLÍNICOS \(DATOS DE PRUEBA\)) Tj ET
+BT /F1 9 Tf 50 786 Td (Paciente: Persona de Prueba        DNI: 00000000T        NHC: 123456) Tj ET
+BT /F1 9 Tf 50 772 Td (Fecha de nacimiento: 12/05/1980        Edad: 45 años        Sexo: Mujer) Tj ET
+BT /F1 9 Tf 50 758 Td (Nº petición: 2026-004512        Fecha de extracción: 14/10/2026 08:32) Tj ET
+BT /F1 9 Tf 50 744 Td (Médico solicitante: Dra. Ejemplo        Centro: C.S. Ejemplo, Tel. 912 345 678) Tj ET
+BT /F2 10 Tf 50 696 Td (HORMONAS Y VITAMINAS) Tj ET
+BT /F1 9 Tf 50 680 Td (TSH: 7,85 µUI/mL      \(0,40 - 4,00\)) Tj ET
+BT /F1 9 Tf 50 666 Td (T4 libre: 0,82 ng/dL      \(0,90 - 1,70\)) Tj ET
+BT /F1 9 Tf 50 652 Td (25-OH Vitamina D: 14,2 ng/mL      \(30 - 100\)) Tj ET
+BT /F1 9 Tf 50 638 Td (Vitamina B12: 420 pg/mL      \(200 - 900\)) Tj ET
+BT /F1 9 Tf 50 624 Td (Ferritina: 45 ng/mL      \(15 - 150\)) Tj ET
+BT /F1 9 Tf 50 610 Td (Calcio: 9,4 mg/dL      \(8,5 - 10,5\)) Tj ET
+BT /F1 9 Tf 50 596 Td (Magnesio: 1,9 mg/dL      \(1,7 - 2,4\)) Tj ET
+BT /F1 8 Tf 50 40 Td (Página 1 de 1. Valores marcados con * o H/L fuera del intervalo de referencia.) Tj ET
+
+endstream
+endobj
+4 0 obj
+<< /Type /Page /Parent 5 0 R /MediaBox [0 0 595 842] /Contents 3 0 R /Resources << /Font << /F1 1 0 R /F2 2 0 R >> >> >>
+endobj
+5 0 obj
+<< /Type /Pages /Kids [4 0 R] /Count 1 >>
+endobj
+6 0 obj
+<< /Type /Catalog /Pages 5 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000000015 00000 n 
+0000000112 00000 n 
+0000000214 00000 n 
+0000001415 00000 n 
+0000001551 00000 n 
+0000001608 00000 n 
+trailer
+<< /Size 7 /Root 6 0 R >>
+startxref
+1657
+%%EOF
