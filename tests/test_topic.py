@@ -44,6 +44,9 @@ OTHER = [
     "¿Cómo invierto mis ahorros?", "¿Qué es la inteligencia artificial?",
 ]
 # Mixed or unclear: never decided as health by the rules alone
+# Battery 25/10: these waited for the model classifier (10-20 s more with several people)
+for q in ["¿Es malo comer mucho azúcar?", "¿Es bueno beber agua con limón?", "¿es malo saltarse el desayuno?"]:
+    HEALTH.append(q)
 UNSURE = ["Me torcí el tobillo jugando al fútbol", "Resuelve este ejercicio de matemáticas", "¿Es bueno el café?",
           "¿Y con miel?", "¿Qué significa efímero?"]
 
@@ -69,6 +72,11 @@ def test_rules():
     check("receta de cocina: otro tema", topic.classify("Dame una receta de lentejas")[0] == "other")
     check("receta para una dieta de salud: salud", topic.classify("Dame una receta sin gluten para un celíaco")[0] == "health")
     check("receta para diabéticos: salud", topic.classify("¿Me das una receta de postre para diabéticos?")[0] == "health")
+    for m in ["cada cuanto debo tomarlo?", "¿cuántas veces al día?", "ok", "vale", "¿ibuprofeno?", "🤒"]:
+        check(f"no es un mensaje sin sentido: {m}", not guardrails.is_gibberish(m))
+    for m in ["asdkjh qwe", "asdf", "qwerty", "aaaaaa", "¿¿??", "hfjdks"]:
+        check(f"sí es un mensaje sin sentido: {m}", guardrails.is_gibberish(m))
+    check("en una conversación, nada se corta como sin sentido", guardrails.check("asdf", in_conversation=True) is None)
     history = [{"role": "user", "content": "x"}, {"role": "assistant", "content": topic.OFF_TOPIC}]
     check("una negativa no cuenta como conversación de salud", not topic.health_conversation(history))
     history.append({"role": "assistant", "content": "**Resumen:** ..."})
@@ -142,6 +150,19 @@ def test_api():
 
     r = ask(c, "Me duele mucho el pecho y se me va al brazo izquierdo")
     check("API: las urgencias se responden siempre", r.headers.get("X-Emergency") == "1")
+
+    # The conversation of the screenshot, with its own account (the free questions above are used)
+    f = TestClient(main.app)
+    assert f.post("/auth/register", json={"email": "topic2@example.com", "password": "password123"}).status_code == 204
+    first = ask(f, "Tengo agujetas después de ir al gym, ¿qué puedo tomar?")
+    r = ask(f, "cada cuanto debo tomarlo?", first.headers["X-Session-Id"])
+    check("API: seguimiento de la captura ('cada cuanto debo tomarlo?'): responde el modelo",
+          "Respuesta de salud" in r.text and "No he entendido" not in r.text)
+    history = main.sessions[first.headers["X-Session-Id"]]["history"]
+    check("API: el seguimiento lleva la conversación anterior",
+          len(history) == 4 and history[0]["content"].startswith("Tengo agujetas"))
+    check("API: la lista de medicamentos para la web viaja en la respuesta", "Paracetamol" in
+          __import__("urllib.parse").parse.unquote(first.headers.get("X-Suggested-Meds", "")))
 
     guest = TestClient(main.app)
     r = ask(guest, "Recomiéndame una película")

@@ -123,27 +123,18 @@ const PILL_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="
 // (it suggested NSAIDs with warfarin and in pregnancy, and gave doses for a child).
 const NSAID_RE = /ibuprofen|naproxen|aspirin|acetylsalicylic|acetilsalic|diclofenac|ketoprofen|dexketoprofen|celecoxib|nsaid|\baine|antiinflamatorio/i;
 const ANTICOAG_RE = /warfarin|acenocoumarol|acenocumarol|sintrom|apixab|rivaroxab|dabigatr|edoxab|heparin|anticoag|blood thinner/i;
-const DOSE_RE = /\b\d+(?:[.,]\d+)?\s?(?:-\s?\d+(?:[.,]\d+)?\s?)?(?:mg\/kg|mg|ml|mcg|µg|g)\b/i;
+const DOSE_RE = /\b\d+(?:[.,]\d+)?\s?(?:-\s?\d+(?:[.,]\d+)?\s?)?(?:mg\/kg|mg|ml|mcg|µg|gramos?|g)\b/i;
 const ANTIBIOTIC_RE = /amoxicil|penicil|ampicil|cloxacil|azitromic|claritromic|cefurox|cefalex|ciprofloxac|levofloxac|antibi[oó]tic|antibiotic/i;
 
 // How to take common over-the-counter medicines, written in code and never by the model
 // (the model gave wrong doses in testing). Usual adult doses from Spanish leaflets for
 // non-prescription presentations; they must be reviewed by a pharmacist before real use.
-const DOSING = [
-  [/paracetamol|acetaminof|acetaminophen/i, "1 comprimido de 500 mg a 1 g cada 6–8 horas. No superes 3 g al día."],
-  [/dexketoprofen/i, "1 comprimido de 25 mg cada 8 horas, con comida. No superes 75 mg al día."],
-  [/ibuprofen/i, "1 comprimido de 200 o 400 mg cada 6–8 horas, con comida. No superes 1.200 mg al día."],
-  [/naproxen/i, "1 comprimido de 220 mg cada 8–12 horas, con comida. No superes 660 mg al día."],
-  [/aspirin|acetilsalic|acetylsalicylic/i, "1 comprimido de 500 mg cada 4–6 horas, con comida. No superes la dosis máxima del prospecto."],
-  [/omeprazol/i, "1 cápsula de 20 mg al día, antes del desayuno. Sin receta, máximo 14 días seguidos."],
-  [/loratadin/i, "1 comprimido de 10 mg al día."],
-  [/cetirizin/i, "1 comprimido de 10 mg al día, mejor por la noche (puede dar sueño)."],
-  [/oximetazolin|oxilmetazolin|oxymetazolin/i, "1–2 pulverizaciones en cada fosa nasal cada 12 horas. Máximo 3 días seguidos."],
-  [/loperamid/i, "2 cápsulas (4 mg) al principio y 1 (2 mg) tras cada deposición líquida. No superes 6 al día ni 2 días seguidos."],
-  [/hidrocortisona|hydrocortison/i, "Una capa fina 1–2 veces al día en la zona. Máximo 7 días seguidos."],
-  [/rehidrataci|suero oral/i, "Prepáralo como indica el sobre y bébelo a sorbos frecuentes."],
-  [/salin|suero fisiol|agua de mar/i, "Lavados nasales varias veces al día, cuando lo necesites."],
-];
+// The list is in static/dosing.json, shared with the server (dosing.py answers "¿cada cuánto
+// lo tomo?" with the same text). Until it loads, every medicine says "Sigue el prospecto".
+let DOSING = [];
+fetch("dosing.json").then((r) => r.json()).then((list) => {
+  DOSING = list.map((d) => [new RegExp(d.match, "i"), d.how]);
+}).catch(() => {});
 
 function howToTake(name, ctx) {
   const child = ctx && (ctx.who === "child" || (ctx.age !== "" && Number(ctx.age) < 16));
@@ -228,7 +219,8 @@ function proseRisks(ctx) {
 function applyProseSafety(el, ctx, opts = {}) {
   const risks = ctx ? proseRisks(ctx) : [];
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => n.parentElement.closest(".med-card, .prose-warning, .emergency, code")
+    // the table and its note already went through applyMedicationSafety
+    acceptNode: (n) => n.parentElement.closest(".med-card table, .med-note, .med-head, .med-avoid, .prose-warning, .emergency, code")
       ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
   });
   const nodes = [];
@@ -280,6 +272,93 @@ function applyProseSafety(el, ctx, opts = {}) {
   }
 }
 
+// The model does not always write the medication table as markdown: rows without the leading
+// "|", without a header or the "|---|" line, several medicines in one line, or the "Evitar:"
+// line as one more cell ("Paracetamol | Para el dolor | ... | Evitar: Ibuprofeno."). Inside the
+// "Medicación" section, such lines become a proper table with the usual three columns, and
+// "Evitar:" goes back to its own line, so the safety rules for the table always apply.
+const MED_HEADS = ["Medicamento", "Para qué sirve", "Precaución"];
+const MED_WORD = "(?:Medicaci[oó]n|Medicamentaci[oó]n|Medicamentos?|Medication)";
+const MED_SECTION_RE = new RegExp(`^\\s*\\**\\s*${MED_WORD}\\s*:?\\s*\\**\\s*:?\\s*$`, "i");
+const NEXT_SECTION_RE = /^\s*\*\*[^*]+:\*\*/;
+
+function normalizeMedTable(text) {
+  // "**Medicación:** Paracetamol | ... |" on one line: the heading on its own line first
+  text = text.replace(new RegExp(`^([ \\t]*\\**[ \\t]*${MED_WORD}[ \\t]*:?[ \\t]*\\**[ \\t]*:?)[ \\t]*([^\\n|]*\\|.*)$`, "gim"), "$1\n$2");
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => MED_SECTION_RE.test(l));
+  if (start === -1) return text;
+  let end = start + 1;
+  while (end < lines.length && !NEXT_SECTION_RE.test(lines[end])) end++;
+  const section = lines.slice(start + 1, end);
+  const pipeRows = section.filter((l) => l.includes("|"));
+  // a header and a separator but no medicine rows is not a table either
+  const dataRows = pipeRows.filter((l) => !/^\s*\|?\s*:?-{3,}/.test(l) && !/medicamento|para qu[eé] sirve|precauci[oó]n/i.test(l));
+  const columns = (l) => l.trim().replace(/^\||\|$/g, "").split("|").length;
+  const separator = pipeRows.find((l) => /^\s*\|?\s*:?-{3,}/.test(l));
+  const wellFormed = separator && pipeRows.every((l) => /^\s*\|/.test(l)) && dataRows.length > 0 &&
+    columns(separator) === columns(pipeRows[0]) &&
+    !pipeRows.some((l) => /\|\s*\**\s*(Evitar|Avoid)\b/i.test(l) || NO_MEDICATION_RE.test(l));
+  if (!pipeRows.length || wellFormed) return text;
+
+  const avoid = [];
+  let rows = [];
+  for (const line of pipeRows) {
+    if (/^\s*\|?\s*:?-{3,}/.test(line)) continue; // a separator line
+    let cells = line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim()).filter(Boolean);
+    // "| **Evitar:** | Ibuprofeno, naproxeno | No los tomes |": the rest of the row is what to avoid
+    const at = cells.findIndex((c) => /^\**\s*(Evitar|Avoid)\b/i.test(c));
+    if (at !== -1) {
+      const first = cells[at].replace(/^\**\s*(Evitar|Avoid)\s*:?\**\s*:?\s*/i, "").trim();
+      avoid.push([first, ...cells.slice(at + 1)].filter(Boolean).join(". "));
+      cells = cells.slice(0, at);
+    }
+    // "No hace falta medicación" as one more cell contradicts the medicines of the row
+    cells = cells.filter((c) => !NO_MEDICATION_RE.test(c));
+    if (!cells.length) continue;
+    // "Medicamento | Para qué sirve | Precaución" written as a row: it is the header
+    if (cells.some((c) => /^(medicamento|para qu[eé]|precauci[oó]n|medicine)/i.test(c))) continue;
+    // several medicines in one line: one row each
+    if (cells.length > 3 && cells.length % 3 === 0) {
+      for (let i = 0; i < cells.length; i += 3) rows.push(cells.slice(i, i + 3));
+    } else {
+      rows.push([...cells.slice(0, 2), cells.slice(2).join(" ")].map((c) => c ?? ""));
+    }
+  }
+  rows = rows.map((r) => MED_HEADS.map((_, i) => r[i] || ""));
+  const table = [`| ${MED_HEADS.join(" | ")} |`, "|---|---|---|", ...rows.map((r) => `| ${r.join(" | ")} |`)];
+  const otherLines = section.filter((l) => !pipeRows.includes(l));
+  const rebuilt = [...table, ...(avoid.length ? ["", `Evitar: ${avoid.join(", ")}`] : []), ...otherLines];
+  return [...lines.slice(0, start + 1), ...rebuilt, ...lines.slice(end)].join("\n");
+}
+
+// The right over-the-counter medicines for the symptom come from the server (symptom_meds.py,
+// header X-Suggested-Meds). If the model wrote no table ("No hace falta medicación" to a child
+// with diarrhoea, or a plain list), the table is built from them; the safety rules then apply.
+function addSuggestedTable(card, suggested) {
+  // A table with only its header (the model wrote the medicines as plain text) does not count
+  card.querySelectorAll(".table-wrap").forEach((t) => { if (!t.querySelector("tbody tr")) t.remove(); });
+  if (!suggested?.length || card.querySelector("table")) return;
+  const names = suggested.map(([name]) => name.toLowerCase().split(" ")[0]);
+  // Line by line: "No hace falta medicación" or the plain list goes, an "Evitar:" line stays
+  const replaced = (line) => {
+    const text = line.replace(/<[^>]+>/g, "").toLowerCase();
+    if (/^\s*(evitar|avoid):/.test(text)) return false;
+    return /no hace falta medicaci|no es necesari[oa] (tomar )?medicaci/.test(text) || names.some((n) => text.includes(n));
+  };
+  card.querySelectorAll("p, li").forEach((node) => {
+    const keep = node.innerHTML.split(/<br\s*\/?>/i).filter((line) => !replaced(line));
+    if (!keep.join("").trim()) node.remove();
+    else node.innerHTML = keep.join("<br>");
+  });
+  card.querySelectorAll("ul, ol").forEach((list) => { if (!list.children.length) list.remove(); });
+  const md = [`| ${MED_HEADS.join(" | ")} |`, "|---|---|---|",
+    ...suggested.map(([name, why]) => `| ${name} | ${why} | Lee el prospecto antes de tomarlo. |`)].join("\n");
+  const holder = document.createElement("div");
+  holder.innerHTML = renderMarkdown(md);
+  card.querySelector(".med-head").after(...holder.childNodes);
+}
+
 // Renders an answer and groups the "Medication:" section (title, table, "Avoid:" line) into a card
 function renderAnswer(el, text, ctx, opts = {}) {
   text = text
@@ -292,20 +371,28 @@ function renderAnswer(el, text, ctx, opts = {}) {
     .replace(/^\W*Conte(?:xt|xto):.*$/gim, "")
     .replace(/^\W*If the context.*$/gim, "")
     .replace(/^.*\[Datos oficiales de CIMA.*$/gm, "") // the official facts line, if echoed
+    .replace(/^\W*Datos oficiales de CIMA.*$/gim, "")
+    .replace(/^\s*-\s*sobre «[^»]*»:.*$/gm, "")
+    .replace(/^\W*En la tabla de Medicaci[oó]n pon estos medicamentos.*$/gim, "") // symptom_meds.py note
     .replace(/^\s*[ABC]\)\s*/, "") // the format letter from the system prompt ("A) **Resumen:**")
     .replace(/<(start|end)_of_(image|turn)>/g, "") // special model tokens written as text
     // English notes about the prompt, e.g. "(Note: The question ... does not fit the structure ...)"
     .replace(/^\W*\(?\s*Note\b[^\n]*$/gim, "")
     .replace(/^(\*\*[^*\n]+:\*\*|\p{Lu}\p{Ll}+:)[ \t]*(\|.*\|)[ \t]*$/gmu, "$1\n$2") // "**Medication:** | a | b |"
     .trim();
-  el.innerHTML = renderMarkdown(text);
-  const start = [...el.children].find((c) => /^(Medicación|Medicacion|Medication):?$/i.test(c.querySelector("strong:first-child")?.textContent.trim() || ""));
-  if (start) buildMedCard(el, start, ctx);
+  // Only the table, without the "Medicación:" title: it is still the medication section,
+  // so the card and its safety rules apply
+  if (!new RegExp(`^\\W*${MED_WORD}\\W*:`, "im").test(text)) {
+    text = text.replace(/^(\s*\|\s*\**\s*Medicamentos?\s*\**\s*\|)/im, "**Medicación:**\n$1");
+  }
+  el.innerHTML = renderMarkdown(normalizeMedTable(text));
+  const start = [...el.children].find((c) => new RegExp(`^${MED_WORD}:?$`, "i").test(c.querySelector("strong:first-child")?.textContent.trim() || ""));
+  if (start) buildMedCard(el, start, ctx, opts);
   applyProseSafety(el, ctx, opts);
 }
 
 // Groups the "Medication:" section (title, table, "Avoid:" line) into a card with the safety rules
-function buildMedCard(el, start, ctx) {
+function buildMedCard(el, start, ctx, opts = {}) {
   const card = document.createElement("div");
   card.className = "med-card";
   card.innerHTML = `<div class="med-head">${PILL_ICON}<span>Medicación</span><small>Sin receta · pautas orientativas, revisa el prospecto</small></div>`;
@@ -319,17 +406,46 @@ function buildMedCard(el, start, ctx) {
     if (!next || (/^\p{Lu}[\p{L} ]+:$/u.test(heading) && !/^(Evitar|Avoid):$/i.test(heading))) break;
     node = next;
   }
+  addSuggestedTable(card, opts.suggested);
   applyMedicationSafety(card, ctx);
   const title = start.querySelector("strong:first-child");
   if (title) title.remove();
   if (!start.textContent.trim()) start.remove();
+  // "No hace falta medicación.<br>Evitar: aspirina." in one paragraph: one paragraph per line
+  card.querySelectorAll("p").forEach((p) => {
+    const lines = p.innerHTML.split(/<br\s*\/?>/i);
+    if (lines.length < 2 || !lines.some((l) => /^\s*(<strong>)?\s*(Evitar|Avoid):/i.test(l))) return;
+    p.replaceWith(...lines.filter((l) => l.trim()).map((l) => {
+      const q = document.createElement("p");
+      q.innerHTML = l.trim();
+      return q;
+    }));
+  });
   card.querySelectorAll("p").forEach((p) => {
     if (/^\s*(Evitar|Avoid):/i.test(p.textContent)) {
       p.classList.add("med-avoid");
       p.innerHTML = p.innerHTML.replace(/^\s*(<strong>)?(Evitar|Avoid):(<\/strong>)?/i, "<strong>Evitar:</strong>");
     }
   });
+  // The model mixes two instructions of the prompt and writes "Evitar: No hace falta medicación."
+  // (next to a table of medicines). An "Evitar:" with nothing to avoid says so, and a loose
+  // "No hace falta medicación" goes when there is a table: it contradicts it.
+  card.querySelectorAll("td").forEach((td) => {
+    if (NO_MEDICATION_RE.test(td.textContent)) td.textContent = "Lee el prospecto antes de tomarlo.";
+  });
+  const hasTable = !!card.querySelector("table");
+  card.querySelectorAll("p").forEach((p) => {
+    if (p.classList.contains("med-avoid")) {
+      const rest = p.textContent.replace(/^\s*(Evitar|Avoid):\s*/i, "").trim();
+      if (!rest || NO_MEDICATION_RE.test(rest) || /^(ningun[oa]?|nada|no hay|-)\.?$/i.test(rest)) {
+        p.innerHTML = "<strong>Evitar:</strong> nada en particular.";
+      }
+    } else if (hasTable && NO_MEDICATION_RE.test(p.textContent)) {
+      p.remove();
+    }
+  });
 }
+const NO_MEDICATION_RE = /no hace falta (tomar )?(ning[uú]n )?medicaci|no es necesari[oa] (tomar )?(ning[uú]n[oa]? )?medica|no necesitas (tomar )?medicaci/i;
 
 // Never lose an answer because of a formatting problem: if rendering fails, show it as plain
 // text, without doses (the safety layer above could not run)
@@ -476,6 +592,8 @@ async function send(text) {
     }
     const guestAnswer = resp.headers.get("X-Guest") === "1";
     const trusted = resp.headers.get("X-Fixed-Answer") === "1"; // written in code, reviewed doses
+    let suggested = null;
+    try { suggested = JSON.parse(decodeURIComponent(resp.headers.get("X-Suggested-Meds") || "null")); } catch { /* none */ }
     state.sessionId = resp.headers.get("X-Session-Id") || state.sessionId;
     updateUsageFromHeaders(resp.headers);
     if (resp.headers.get("X-Emergency")) showEmergencyBanner(msg);
@@ -486,12 +604,12 @@ async function send(text) {
       const { value, done } = await reader.read();
       if (done) break;
       answer += decoder.decode(value, { stream: true });
-      showAnswer(msg.content, answer, ctxSnapshot, { trusted });
+      showAnswer(msg.content, answer, ctxSnapshot, { trusted, suggested });
       scrollToBottom();
     }
     answer += decoder.decode();
     if (!answer.trim()) throw new Error("El modelo no ha devuelto ninguna respuesta.");
-    showAnswer(msg.content, answer, ctxSnapshot, { trusted });
+    showAnswer(msg.content, answer, ctxSnapshot, { trusted, suggested });
     if (image) addImageNotes(msg, answer);
     if (guestAnswer) addSignupCta(msg, `¿Te ha servido? Crea una cuenta gratis para seguir preguntando: ${FREE.text} preguntas, ${FREE.image} imagen y ${FREE.lab} analítica gratis.`);
   } catch (err) {
@@ -582,7 +700,8 @@ function labRef(r) {
   if (r.ref_source === "default") {
     const range = r.low != null && r.high != null ? `${fmtNum(r.low)}–${fmtNum(r.high)}`
       : r.high != null ? `menos de ${fmtNum(r.high)}` : `más de ${fmtNum(r.low)}`;
-    return `Referencia orientativa para adultos: ${range} (el informe no traía rango)`;
+    return `Referencia orientativa para adultos: ${range} (no he podido leer el rango del informe)` +
+      (r.ref_note ? `. ${r.ref_note}` : "");
   }
   return "";
 }
@@ -622,6 +741,14 @@ function labItem(r) {
   </div>`;
 }
 
+// Sex and age read from the report (they pick the reference range), or from the form
+function labPatient(data) {
+  const p = data.patient || {};
+  const parts = [p.sex === "f" ? "mujer" : p.sex === "m" ? "hombre" : "", p.age != null ? `${p.age} años` : ""].filter(Boolean);
+  if (!parts.length) return "";
+  return `<p class="lab-patient">${p.from_report ? "Datos leídos de tu informe" : "Datos de tu perfil"}: ${escapeHtml(parts.join(", "))}</p>`;
+}
+
 function renderLabReport(el, data) {
   const abnormal = data.results.filter((r) => ["high", "low", "positive"].includes(r.status));
   abnormal.sort((a, b) => (b.critical - a.critical) || (a.slight - b.slight));
@@ -637,6 +764,10 @@ function renderLabReport(el, data) {
       <div class="lab-counts"><span class="lab-count">${c.total} valores leídos</span>
         ${c.abnormal ? `<span class="lab-count bad">${c.abnormal} fuera de rango</span>` : ""}
         <span class="lab-count good">${c.normal} ${c.normal === 1 ? "normal" : "normales"}</span></div></div>
+    ${labPatient(data)}
+    ${data.default_ranges ? `<p class="lab-warn">No he podido leer el rango del laboratorio de ${data.default_ranges}
+      ${data.default_ranges === 1 ? "valor" : "valores"} (marcados «orientativa»): los comparo con rangos generales de adultos.
+      Compruébalos con los rangos de tu informe.</p>` : ""}
     ${data.critical.length ? `<div class="lab-critical" role="alert"><strong>Importante: revisa esto hoy</strong>
       ${escapeHtml(data.critical_message)}<ul>${data.critical.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul></div>` : ""}
     ${abnormal.length ? `<h4>Fuera de rango</h4><div class="lab-items">${abnormal.map(labItem).join("")}</div>`
@@ -943,6 +1074,8 @@ async function openPlans(reason) {
       <strong>${escapeHtml(plan.name)}</strong>
       <span class="price">${fmtPrice(plan.price_eur)}</span>
       <span class="per">${PER[plan.interval] || ""} · se renueva sola</span>
+      ${planValue(plan, data.plans)}
+      <ul class="plan-includes"><li>Preguntas sin límite</li><li>Fotos y analíticas sin límite</li><li>Cancela cuando quieras</li></ul>
       <button type="button" class="btn ${current || plan.best_value ? "primary" : ""}">${label}</button>`;
     const btn = card.querySelector("button");
     btn.disabled = (current && !sub.cancel_at_period_end) || next || (!!sub && !current && !test);
@@ -950,7 +1083,27 @@ async function openPlans(reason) {
       current ? changeSubscription("resume", btn) : checkout(id, btn));
     els.planGrid.appendChild(card);
   }
+  renderPlanCompare(data.features || []);
   els.plans.hidden = false;
+}
+
+// "4,17 € al mes · ahorras un 48 %" next to the price, compared with the monthly plan
+function planValue(plan, plans) {
+  const monthly = Object.values(plans).find((p) => p.interval === "month");
+  const perMonth = { week: plan.price_eur * 52 / 12, month: plan.price_eur, year: plan.price_eur / 12 }[plan.interval];
+  if (!perMonth || plan.interval === "month") return "";
+  const saving = monthly ? Math.round((1 - perMonth / monthly.price_eur) * 100) : 0;
+  return `<span class="per-month">${fmtPrice(perMonth)} al mes${saving >= 5 ? ` · <b>ahorras un ${saving} %</b>` : ""}</span>`;
+}
+
+// What the free account and Premium include, row by row (✓ / – or a short text)
+function renderPlanCompare(features) {
+  const cell = (v) => v === true ? '<span class="yes" aria-label="Incluido">✓</span>'
+    : v === false ? '<span class="no" aria-label="No incluido">–</span>' : escapeHtml(v);
+  $("plan-compare").innerHTML = features.length ? `<h3>Qué incluye cada plan</h3>
+    <table><thead><tr><th></th><th>Gratis</th><th>Premium</th></tr></thead><tbody>
+    ${features.map((f) => `<tr><td>${escapeHtml(f.name)}</td><td>${cell(f.free)}</td><td>${cell(f.premium)}</td></tr>`).join("")}
+    </tbody></table>` : "";
 }
 
 function renderSubscription(sub) {

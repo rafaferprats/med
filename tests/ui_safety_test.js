@@ -130,6 +130,115 @@
     }],
     ["texto: la tabla sigue igual (ibuprofeno tachado en embarazo)", () =>
       flagged(render(table(meds) + "\n" + prose, { ...base, pregnant: true }), "Ibuprofeno")],
+    // Medication tables written badly by the model are rebuilt (normalizeMedTable)
+    ["tabla en una línea sin cabecera (caso real): se reconstruye", () => {
+      const el = render("**Resumen:** Dolor de cabeza.\n\n**Medicación:**\nParacetamol | Para aliviar el dolor | No tomar más de 4 gramos al día. | Evitar: Ibuprofeno.\n\n**Señales de alarma:** Si empeora.", base);
+      const rows = el.querySelectorAll(".med-card tbody tr");
+      return rows.length === 1 && rows[0].cells[0].textContent === "Paracetamol" && how(el, "Paracetamol").includes("No superes 3 g")
+        && !/4 gramos/.test(el.innerText) && el.querySelector(".med-card .med-avoid")?.textContent.includes("Ibuprofeno")
+        && /Señales de alarma/.test(el.innerText);
+    }],
+    ["título y fila sin barra inicial en la misma línea", () => {
+      const el = render("**Medicación:** Paracetamol | Dolor | Ok\n**Señales de alarma:** Fiebre.", base);
+      return el.querySelectorAll(".med-card tbody tr").length === 1;
+    }],
+    ["varios medicamentos en una sola línea: una fila cada uno", () => {
+      const el = render("**Medicación:**\nParacetamol | Dolor | Ok | Loratadina | Alergia | Puede dar sueño\n**Señales de alarma:** x", base);
+      const names = [...el.querySelectorAll(".med-card tbody tr")].map((tr) => tr.cells[0].textContent);
+      return names.join() === "Paracetamol,Loratadina";
+    }],
+    ["filas con barras pero sin cabecera ni separador", () => {
+      const el = render("**Medicación:**\n| Paracetamol | Dolor | Ok |\n| Ibuprofeno | Dolor | Con comida |\n**Señales de alarma:** x", { ...base, pregnant: true });
+      return el.querySelectorAll(".med-card tbody tr").length === 2 && flagged(el, "Ibuprofeno");
+    }],
+    ["tabla bien escrita: no se toca", () => {
+      const el = render(table(meds), base);
+      return el.querySelectorAll(".med-card tbody tr").length === meds.length && normalizeMedTable(table(meds)) === table(meds);
+    }],
+    ["dosis en 'gramos' dentro de la tabla: quitada", () =>
+      !/gramos/.test(render(table([["Paracetamol", "Dolor", "No más de 4 gramos al día"]]), base).innerText)],
+    ["dosis en un párrafo de la tarjeta de medicación: quitada", () =>
+      !/400 mg/.test(render("**Medicación:**\nPuedes tomar ibuprofeno 400 mg cada 8 horas.\n**Señales de alarma:** x", base).innerText)],
+    // Medicines for the symptom sent by the server (X-Suggested-Meds)
+    ["'No hace falta medicación' con lista del servidor: tabla con suero oral (niño)", () => {
+      const el = render("**Resumen:** Diarrea.\n\n**Medicación:** No hace falta medicación.\n\n**Señales de alarma:** Si no orina.",
+        { ...base, who: "child", age: "4" }, { suggested: [["Suero oral de rehidratación", "Repone el agua y las sales"]] });
+      const rows = el.querySelectorAll(".med-card tbody tr");
+      return rows.length === 1 && rows[0].cells[0].textContent.startsWith("Suero oral") && !/No hace falta/.test(el.innerText)
+        && how(el, "Suero oral").startsWith("Según el peso");
+    }],
+    ["lista suelta con lista del servidor: tabla", () => {
+      const el = render("**Medicación:** loratadina, cetirizina, suero fisiológico.\n\n**Señales de alarma:** x", base,
+        { suggested: [["Loratadina", "Antihistamínico"], ["Cetirizina", "Antihistamínico"], ["Suero fisiológico", "Lavados"]] });
+      return el.querySelectorAll(".med-card tbody tr").length === 3 && how(el, "Loratadina") === "1 comprimido de 10 mg al día.";
+    }],
+    ["con tabla del modelo, la lista del servidor no se añade", () => {
+      const el = render(table(meds), base, { suggested: [["Loratadina", "x"]] });
+      return el.querySelectorAll(".med-card tbody tr").length === meds.length;
+    }],
+    ["la línea 'Evitar:' se conserva al montar la tabla", () => {
+      const el = render("**Medicación:** No hace falta medicación.\nEvitar: aspirina.\n\n**Señales de alarma:** x", base,
+        { suggested: [["Paracetamol", "Dolor"]] });
+      return el.querySelectorAll(".med-card tbody tr").length === 1 && /Evitar/.test(el.innerText);
+    }],
+    // "Evitar: No hace falta medicación." next to a table (screenshot)
+    ["'Evitar: No hace falta medicación' con tabla montada: sin contradicción", () => {
+      const el = render("**Qué puedes hacer:** Estira el cuello.\n\n**Medicación:**\nEvitar: No hace falta medicación.\n\n**Señales de alarma:** Fiebre.", base,
+        { suggested: [["Paracetamol", "Alivia el dolor"], ["Ibuprofeno", "Alivia el dolor y la inflamación"]] });
+      return el.querySelectorAll(".med-card tbody tr").length === 2 && !/No hace falta/i.test(el.innerText)
+        && el.querySelector(".med-avoid")?.textContent === "Evitar: nada en particular.";
+    }],
+    ["tabla del modelo y 'No hace falta medicación' suelto: se quita", () => {
+      const el = render(table(meds).replace("Evitar: nada en particular.", "No hace falta medicación.\nEvitar: aspirina."), base);
+      return !/No hace falta/i.test(el.innerText) && /Evitar: aspirina/.test(el.innerText);
+    }],
+    ["'Evitar: ninguno' pasa a 'nada en particular'", () =>
+      render(table(meds).replace("Evitar: nada en particular.", "Evitar: ninguno."), base).querySelector(".med-avoid").textContent === "Evitar: nada en particular."],
+    ["sin tabla, 'No hace falta medicación' se respeta", () =>
+      /No hace falta medicación/.test(render("**Medicación:** No hace falta medicación.\n\n**Señales de alarma:** x", base).innerText)],
+    ["tabla con solo la cabecera y medicamentos en texto: se monta la tabla", () => {
+      const el = render("**Medicación:**\n| Medicamento | Para qué sirve | Precaución |\n|---|---|---|\nSuero oral: repone sales.\n\n**Señales de alarma:** x",
+        base, { suggested: [["Suero oral de rehidratación", "Repone sales"], ["Loperamida", "Reduce deposiciones"]] });
+      return el.querySelectorAll(".med-card tbody tr").length === 2;
+    }],
+    ["tabla con solo la cabecera y sin lista del servidor: sin tabla vacía", () => {
+      const el = render("**Medicación:**\n| Medicamento | Para qué sirve | Precaución |\n|---|---|---|\n\n**Señales de alarma:** x", base);
+      return !el.querySelector(".med-card table") || el.querySelectorAll(".med-card tbody tr").length > 0;
+    }],
+    // Battery of 25/10: answers of the real model that showed no table or a contradiction
+    ["'**Medicamento:**' en prosa con lista del servidor: tabla", () => {
+      const el = render("**Resumen:** x\n**Medicamento:** Paracetamol (Alivia el dolor).\n**Evitar:** Ibuprofeno y aspirina.\n**Señales de alarma:** x",
+        base, { suggested: [["Paracetamol", "Alivia el dolor"]] });
+      return el.querySelectorAll(".med-card tbody tr").length === 1 && /Evitar: Ibuprofeno/.test(el.innerText) && /Señales de alarma/.test(el.innerText);
+    }],
+    ["separador de 4 columnas en una tabla de 3: tabla", () => {
+      const el = render("**Medicamentos:** | Medicamento | Para qué sirve | Precaución |\n|---|---|---|---|\n| Paracetamol | Alivia el dolor | Lee el prospecto |\n**Señales de alarma:** x", base);
+      return el.querySelectorAll(".med-card tbody tr").length === 1;
+    }],
+    ["fila '| **Evitar:** | Ibuprofeno… |' va a Evitar, no es un medicamento", () => {
+      const el = render("**Medicamento:** | Medicamento | Para qué sirve | Precaución |\n|---|---|---|---|\n| Suero oral | Repone sales | Bebe despacio |\n" +
+        "| **Evitar:** | Ibuprofeno, Naproxeno | No los tomes porque estás embarazada. |\n**Señales de alarma:** x", { ...base, pregnant: true });
+      const rows = [...el.querySelectorAll(".med-card tbody tr")];
+      return rows.length === 1 && rows[0].cells[0].textContent.startsWith("Suero") && /Evitar: Ibuprofeno/.test(el.querySelector(".med-avoid")?.textContent || "");
+    }],
+    ["'No hace falta medicación' en una celda: se quita", () => {
+      const el = render("**Medicación:**\n| Medicamento | Para qué sirve | Precaución |\n|---|---|---|\n| Paracetamol | Alivia el dolor | No hace falta medicación. |\n**Señales de alarma:** x", base);
+      return el.querySelectorAll(".med-card tbody tr").length === 1 && !/No hace falta/i.test(el.innerText);
+    }],
+    ["fila en línea acabada en 'No hace falta medicación': se quita", () => {
+      const el = render("**Medicación:** Paracetamol | Para el dolor | Ninguna | Ibuprofeno | Para la inflamación | Ninguna | No hace falta medicación.\n**Señales de alarma:** x", base);
+      return el.querySelectorAll(".med-card tbody tr").length === 2 && !/No hace falta/i.test(el.innerText);
+    }],
+    ["notas internas repetidas por el modelo: se quitan", () => {
+      const t = render(table(meds) + "\nEn la tabla de Medicación pon estos medicamentos (los que encajen con la persona), no otros.\n" +
+        "Datos oficiales de CIMA (AEMPS), úsalos en lugar de tu memoria:\n- sobre «nolotil»: principio activo: metamizol.", base).innerText;
+      return !/CIMA|pon estos medicamentos|principio activo/.test(t);
+    }],
+    ["solo la tabla, sin 'Medicación:': tarjeta y reglas de seguridad", () => {
+      const el = render("| Medicamento | Para qué sirve | Precaución |\n| :--- | :--- | :--- |\n| Paracetamol | Baja la fiebre | Lee el prospecto |\n" +
+        "| Ibuprofeno | Baja la fiebre | Con comida |\n| **Evitar:** | nada en particular. | |", { ...base, pregnant: true });
+      return !!el.querySelector(".med-card table") && flagged(el, "Ibuprofeno");
+    }],
     ["imagen con hallazgo grave: banner", () => imageNotes("Se observa una hemorragia en el hemisferio izquierdo.").banner],
     ["imagen sin hallazgo grave: sin banner", () => !imageNotes("Radiografía de tórax sin alteraciones.").banner],
     ["imagen: aviso fijo de análisis orientativo", () => imageNotes("Radiografía normal.").note],

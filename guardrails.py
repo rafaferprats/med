@@ -183,21 +183,36 @@ COMMON_WORDS = {
 }
 
 
+KEYBOARD_ROWS = ("qwertyuiop", "asdfghjkl", "zxcvbnm")
+
+
+def _looks_like_a_word(word: str) -> bool:
+    """Has a vowel, no run of 4 consonants and is not a slice of a keyboard row ("asdf")."""
+    w = _plain(word)
+    if len(w) <= 2:
+        return True
+    if not re.search(r"[aeiouy]", w) or re.search(r"[^aeiouy\W\d]{4,}", w):
+        return False
+    return not (len(w) >= 4 and any(w in row or w[::-1] in row for row in KEYBOARD_ROWS))
+
+
 def is_gibberish(question: str) -> bool:
-    """Empty, only symbols, or letters that form no real words ("asdkjh qwe ¿¿?? 123").
-    Emojis alone still count as a message (🤒 = fever)."""
+    """Only text with no meaning at all: symbols, one repeated letter, or keyboard mashing
+    ("asdkjh qwe ¿¿?? 123"). Short real questions ("¿cada cuánto debo tomarlo?", "ok") are not:
+    the topic filter and the model deal with them. Emojis alone still count (🤒 = fever)."""
     words = re.findall(r"[a-záéíóúñüç]+", question.lower())
     if not words:
         return not re.search(r"[\U0001F300-\U0001FAFF]", question)
-    if any(w in COMMON_WORDS for w in words) or HEALTH_RE.search(_plain(question)):
-        return False
-    if any(_plain(w) in medicines._index for w in words):  # "¿ibuprofeno?" is a real question
-        return False
-    return len(question) < 60  # a short message with no single real word
+    letters = "".join(words)
+    if len(set(letters)) == 1 and len(letters) >= 3:  # "aaaaa"
+        return True
+    real = sum(_looks_like_a_word(w) for w in words)
+    return real < len(words) * 0.6
 
 
-def check(question: str) -> Optional[tuple[str, str]]:
-    """(rule name, fixed answer) if the question must not go to the model, else None."""
+def check(question: str, in_conversation: bool = False) -> Optional[tuple[str, str]]:
+    """(rule name, fixed answer) if the question must not go to the model, else None. Inside a
+    conversation a short follow-up is never treated as gibberish: it refers to what came before."""
     plain = _plain(question)
     for name, pattern, answer in _COMPILED:
         if pattern.search(plain):
@@ -205,6 +220,6 @@ def check(question: str) -> Optional[tuple[str, str]]:
             if name == "off_topic" and HEALTH_RE.search(plain):
                 continue
             return name, answer
-    if is_gibberish(question):
+    if not in_conversation and is_gibberish(question):
         return "gibberish", NOT_UNDERSTOOD
     return None

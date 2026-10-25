@@ -8,7 +8,8 @@
 
 The model never reads the PDF: it only gets the classified results to write a summary, and
 NumberGuard removes any sentence of that summary with numbers that aren't in the results.
-Personal data in the PDF (name, ID, dates) is never parsed, stored or sent to the model.
+Of the personal data in the PDF only the sex and the age are read (patient()), to pick the
+right reference range; nothing else (name, ID, address) is parsed, and nothing is stored.
 """
 import io
 import re
@@ -132,14 +133,14 @@ def check_medical(layouts: list[list[str]]) -> dict:
 NUM = r"\d+(?:[.,]\d+)*"
 # Units that contain digits are hidden before looking for the value and the range
 UNIT_WITH_DIGITS = re.compile(
-    r"(?:x\s?)?10\s?(?:\^|e|E|\*\*|\*)?\s?(?:3|6|9|12)\s?/\s?(?:mm3|mm³|[µμu]?[lL])"
+    r"(?:x\s?)?10\s?(?:\^|e|E|\*\*|\*)?\s?(?:3|6|9|12)\s?/?\s?(?:mm3|mm³|[µμu]?[lL])\b"  # "x 10^6 µl" too
     r"|/\s?mm[3³]|\bmm[3³]|/\s?1[.,]73\s?m[2²]?|/\s?24\s?h\b|\bm[2²]\b"
-    r"|(?:x\s?)?10\s?[³⁶⁹]\s?/\s?(?:mm3|mm³|[µμu]?[lL])"
+    r"|(?:x\s?)?10\s?[³⁶⁹]\s?/?\s?(?:mm3|mm³|[µμu]?[lL])\b"
 )
 FLAG = re.compile(r"^\s*(?:\*+|[HLAB]\b|[↑↓]|\(\+\)|\(-\)|alto\b|bajo\b)", re.I)
 BETWEEN = re.compile(rf"({NUM})\s*(?:[-–—]|\ba\b|\bhasta\b)\s*({NUM})", re.I)
-UPPER = re.compile(rf"(?:<=?|≤|\bmenor (?:de|que)\b|\binferior a\b|\bhasta\b)\s*({NUM})", re.I)
-LOWER = re.compile(rf"(?:>=?|≥|\bmayor (?:de|que)\b|\bsuperior a\b)\s*({NUM})", re.I)
+UPPER = re.compile(rf"(?:<=?|≤|\bmenor (?:de|que)\b|\binferior(?: a)?\b|\binf\.?|\bm[aá]x(?:imo)?\.?:?|\bhasta\b)\s*({NUM})", re.I)
+LOWER = re.compile(rf"(?:>=?|≥|\bmayor (?:de|que)\b|\bsuperior(?: a)?\b|\bsup\.?|\bm[ií]n(?:imo)?\.?:?)\s*({NUM})", re.I)
 VALUE = re.compile(rf"(?<![\w§.,])([<>]=?|≤|≥)?\s?({NUM})(?=[HL*↑↓]?(?:[^\w§]|$))")
 QUAL = re.compile(r"(?<!\w)(negativ[oa]s?|positiv[oa]s?|indicios|trazas|ausentes?|presentes?|normal|"
                   r"no se observan?|escas[oa]s|abundantes?|\+{1,4})(?!\w)", re.I)
@@ -165,6 +166,7 @@ def unit_key(unit: str) -> str:
     u = re.sub(r"\s|\^|\*", "", u)
     u = re.sub(r"10e(\d)", r"10\1", u)
     u = re.sub(r"/1[.,]?73m?2?$", "", u)
+    u = re.sub(r"^(x?10(?:3|6|9|12))(?=u?l$|mm3$)", r"\1/", u)  # "x 10³ µl" = "x10³/µl"
     return u.rstrip("/.")
 
 
@@ -184,6 +186,7 @@ class Result:
     high: Optional[float] = None
     ref_text: str = ""
     ref_source: str = ""            # "lab", "default" or ""
+    ref_note: str = ""              # why the default range may not fit this person
     status: str = "unknown"         # normal, low, high, positive, unknown
     slight: bool = False            # within 10% of the limit
     critical: bool = False
@@ -234,8 +237,23 @@ def _match_name(folded: str, in_urine: bool):
     return None, 0
 
 
+CALCITRIOL = re.compile(r"\W*1\s*[,.]\s*25\s*-?\s*(?:\(\s*oh\s*\)\s*2|di\s*-?\s*hidroxi\w*|dihydroxy\w*)(?:\s*-?\s*(?:vitamina|vit\.?)\s*d\d?)?")
+
+
+# "Número total leucocitos en sangre", "% eosinófilos en sangre", "Porcentaje hemoglobina glicosilada"
+NAME_PREFIX = re.compile(r"^\s*(?:numero total(?: de)?|recuento(?: total)?(?: de)?|porcentaje(?: de)?|%)\s*(?=[a-z])")
+
+
 def parse_line(line: str, in_urine: bool = False) -> Optional[Result]:
     folded = fold(line)
+    prefix = NAME_PREFIX.match(folded)
+    pct_prefix = bool(prefix and re.search(r"%|porcentaje", prefix.group(0)))
+    if prefix:
+        line, folded = line[prefix.end():], folded[prefix.end():]
+    lead = CALCITRIOL.match(folded)
+    if lead and lead.group(0).strip():  # "1,25-Dihidroxi vitamina D  70,90 ..." (name starts with digits)
+        line = "Vitamina D 1,25-dihidroxi " + line[lead.end():].lstrip(" :")
+        folded = fold(line)
     if NOT_RESULT.search(folded) and not _match_name(folded, in_urine)[0]:
         return None
     analyte, end = _match_name(folded, in_urine)
@@ -247,10 +265,22 @@ def parse_line(line: str, in_urine: bool = False) -> Optional[Result]:
             return None
         raw_name, end = m.group(1).strip(), m.end(1)
     rest = line[end:]
+    # "Vitamina D: 1,25 Dihidroxi  70,90  20 - 79": the "1,25" is part of the name, not the value.
+    # And 1,25-dihydroxy vitamin D (calcitriol) is not the usual vitamin D test (25-OH, the
+    # body's reserve): it has its own ranges and meaning, so it is not explained as that one.
+    calcitriol = CALCITRIOL.search(fold(line))
+    if calcitriol:
+        cut = CALCITRIOL.match(fold(rest))
+        if cut:
+            rest = rest[cut.end():]
+        elif calcitriol.end() > end:
+            rest = line[calcitriol.end():]
+        if not analyte or analyte["id"] == "vitd":
+            analyte, raw_name = None, "Vitamina D 1,25-dihidroxi (calcitriol)"
     # "(ayunas)", "(CKD-EPI)", "%" right after the name, then leader dots and colons
     rest = re.sub(r"^\s*\([^)]*\)", "", rest)
     rest = re.sub(r"^\s*(?:25\s?-?\s?oh|25\s?-?\s?hidroxi)\b", "", rest, flags=re.I)  # "Vitamina D 25-OH"
-    pct_in_name = bool(re.match(r"^\s*%", rest)) or "%" in raw_name
+    pct_in_name = bool(re.match(r"^\s*%", rest)) or "%" in raw_name or pct_prefix
     rest = re.sub(r"^\s*%", "", rest)
     rest = re.sub(r"^[\s.:_…·]+", " ", rest)
 
@@ -324,6 +354,8 @@ def parse_line(line: str, in_urine: bool = False) -> Optional[Result]:
         analyte = BY_ID[analyte["pct"]]
     elif analyte and analyte.get("pct") and not unit and high is not None and high > analyte["ref"][1] * 3:
         analyte = BY_ID[analyte["pct"]]  # no unit, but the range is clearly a percentage
+    if analyte is None and "hemoglobina" in fold(raw_name) and unit_key(unit) == "mmol/mol":
+        raw_name = "Hemoglobina glicosilada (HbA1c) en mmol/mol"  # "Concentración hemoglobina | glicosilada (A1c)"
     if unit == "%" and analyte and analyte["unit"] != "%" and not analyte.get("pct"):
         unit = ""
     return Result(
@@ -390,10 +422,64 @@ def _default_range(analyte: dict, sex: str):
     if isinstance(ref, dict):
         if sex in ref:
             return ref[sex]
-        lows = [r[0] for r in ref.values()]
-        highs = [r[1] for r in ref.values()]
-        return (min(lows), None if None in highs else max(highs))
+        # Unknown sex: the stricter limits, so a value high for a woman is not called normal
+        lows = [r[0] for r in ref.values() if r[0] is not None]
+        highs = [r[1] for r in ref.values() if r[1] is not None]
+        return (max(lows) if lows else None, min(highs) if highs else None)
     return ref
+
+
+# "Sexo: Mujer", "Sexo: F", "Varón", "Sexo/Edad: M / 52 años"...
+SEX_LINE = re.compile(r"\bsexo\b\W{0,3}(?:/\s*edad\W{0,3})?(mujer|hombre|varon|femenino|masculino|female|male|[fhvm])\b")
+SEX_WORD = re.compile(r"\b(mujer|hombre|varon|femenino|masculino)\b")
+AGE_YEARS = re.compile(r"\b(\d{1,3})\s*anos\b")
+AGE = re.compile(r"\bedad\b\D{0,12}?\b(\d{1,3})\b(?![/.-]\d)")
+BIRTH = re.compile(r"(?:nacimiento|f\.?\s*nac\.?|fecha nac\w*|nacid[oa])\D{0,12}?(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})")
+REPORT_DATE = re.compile(r"(?:fecha|extraccion|recepcion|emision|informe)\D{0,25}?(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})")
+SEX_VALUE = {"mujer": "f", "femenino": "f", "female": "f", "f": "f",
+             "hombre": "m", "varon": "m", "masculino": "m", "male": "m", "h": "m", "v": "m"}
+
+
+def patient(lines: list[str]) -> dict:
+    """{"sex": "m"|"f"|"", "age": int|None} from the header of the report. "Sexo: M" is left
+    out: Spanish labs use it for "mujer" and others for "masculino"."""
+    head = [fold(l) for l in lines[:60]]
+    sex = ""
+    for line in head:
+        m = SEX_LINE.search(line)
+        if m and m.group(1) in SEX_VALUE:
+            sex = SEX_VALUE[m.group(1)]
+            break
+    if not sex:
+        words = {SEX_VALUE[w] for line in head if "sexo" in line or "paciente" in line for w in SEX_WORD.findall(line)}
+        sex = words.pop() if len(words) == 1 else ""
+    age = None
+    for line in head:
+        b = BIRTH.search(line)
+        if b:
+            year = int(b.group(3)) + (1900 if len(b.group(3)) == 2 else 0)
+            if len(b.group(3)) == 2 and year < 1925:
+                year += 100
+            ref = next((REPORT_DATE.search(l) for l in head if REPORT_DATE.search(l) and not BIRTH.search(l)), None)
+            from datetime import date
+            try:
+                born = date(year, int(b.group(2)), int(b.group(1)))
+                when = date(int(ref.group(3)), int(ref.group(2)), int(ref.group(1))) if ref else date.today()
+                age = when.year - born.year - ((when.month, when.day) < (born.month, born.day))
+            except ValueError:
+                age = None
+            break
+    if age is None:
+        for line in head:
+            if not ("edad" in line or "paciente" in line or "sexo" in line):
+                continue
+            m = AGE_YEARS.search(line) or AGE.search(line)  # "Edad 30/05/1992 (28 años)": the 28
+            if m:
+                age = int(m.group(1))
+                break
+    if age is not None and not 0 <= age <= 120:
+        age = None
+    return {"sex": sex, "age": age}
 
 
 def _slight(distance: float, limit: float, low: Optional[float], high: Optional[float]) -> bool:
@@ -423,6 +509,8 @@ def classify(result: Result, sex: str = "", child: bool = False) -> Result:
             high = None if default[1] is None else default[1] / factor
             result.low, result.high = low, high
             result.ref_source = "default"
+            if isinstance(analyte.get("ref"), dict) and SEX_KEYS.get(sex, "") not in analyte["ref"]:
+                result.ref_note = "El rango normal cambia entre hombres y mujeres y no sé tu sexo: uso el límite más estricto."
     v, q = result.value, result.qualifier
     if high is not None and v > high and not q.startswith("<"):
         result.status = "high"
@@ -465,6 +553,9 @@ def analyse(data: bytes, sex: str = "", child: bool = False) -> dict:
     parsed = max((parse(lines) for lines in layouts), key=lambda rs: sum(1 for r in rs if r.analyte))
     if sum(1 for r in parsed if r.analyte) < MIN_RESULTS:
         raise LabError(LAB_UNREADABLE)
+    person = patient(max(layouts, key=len))
+    sex = person["sex"] or sex  # what the report says wins over the form
+    child = child or (person["age"] is not None and person["age"] < 16)
     results = [classify(r, sex, child) for r in parsed]
     order = {g: i for i, g in enumerate(GROUPS)}
     results.sort(key=lambda r: order.get(r.group, len(GROUPS)))
@@ -477,6 +568,9 @@ def analyse(data: bytes, sex: str = "", child: bool = False) -> dict:
         "critical": [r["critical_text"] for r in out if r["critical"]],
         "critical_message": CRITICAL_MESSAGE if any(r["critical"] for r in out) else "",
         "child": child,
+        "patient": {"sex": sex if sex in ("m", "f") else SEX_KEYS.get(sex, ""), "age": person["age"],
+                    "from_report": bool(person["sex"] or person["age"] is not None)},
+        "default_ranges": sum(1 for r in out if r["ref_source"] == "default"),
     }
 
 

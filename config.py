@@ -38,6 +38,16 @@ PLANS = {
                "stripe_price": os.getenv("STRIPE_PRICE_YEARLY", "")},
 }
 
+# What each plan includes, shown in the plans window (✓ / – or a short text). Only what the app does.
+FEATURES = [
+    ("Preguntas de salud", f"{FREE_QUESTIONS} al registrarte y {FREE_DAILY_QUESTIONS} al día", "Sin límite"),
+    ("Fotos de piel, heridas o medicamentos", f"{FREE_IMAGES} gratis", "Sin límite"),
+    ("Analíticas en PDF explicadas valor a valor", f"{FREE_LABS} gratis", "Sin límite"),
+    ("Seguir preguntando cuando se acaban las gratis", False, True),
+    ("Medicamentos sin receta adaptados a embarazo, niños y alergias", True, True),
+    ("Avisos de urgencia", True, True),
+]
+
 TOKEN_DAYS = 30
 COOKIE_NAME = "medapp_session"
 MIN_PASSWORD_LENGTH = 8

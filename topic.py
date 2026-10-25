@@ -25,6 +25,17 @@ GREETING = (
     "o pregúntame por un medicamento o por tu analítica."
 )
 THANKS = "¡De nada! Si tienes cualquier otra duda de salud, aquí estoy. Y si empeoras, consulta a tu médico."
+# "¿De dónde sacas la información?", "¿eres médico?": about the assistant itself
+ABOUT = (
+    "Mis respuestas salen de **MedGemma**, un modelo de inteligencia artificial entrenado con textos "
+    "médicos. Además, la app añade comprobaciones propias:\n"
+    "- Los **medicamentos sin receta** que propongo y cómo se toman están revisados en el código, y los "
+    "datos de medicamentos vienen de **CIMA**, el registro oficial de la AEMPS.\n"
+    "- En las **analíticas**, cada valor se compara con el rango de tu laboratorio.\n"
+    "- Las **urgencias** se detectan con reglas fijas, para avisarte de llamar al 112.\n\n"
+    "No soy médico ni cito estudios concretos, y puedo equivocarme: es información orientativa. "
+    "Para decidir un tratamiento, consulta a tu médico o farmacéutico."
+)
 VET = (
     "Solo puedo ayudarte con la salud de las **personas**. Para tu mascota, consulta a un **veterinario**: "
     "si ha comido algo que puede ser tóxico (chocolate, uvas, medicamentos, xilitol…) o está muy decaída, "
@@ -90,6 +101,13 @@ GREETING_RE = re.compile(r"^(hola|buenas|buenos dias|buenas tardes|buenas noches
                          r"(que tal|como estas)?[\s!?.¿]*$")
 THANKS_RE = re.compile(r"^(muchas )?(gracias|grcias|thanks|thank you|vale gracias|ok gracias|perfecto gracias)"
                        r"[\s!.,]*(por todo|por la ayuda)?[\s!.]*$")
+ABOUT_RE = re.compile(r"\b(de donde sacas|de donde (salen|vienen|obtienes)|cuales son tus fuentes|tus fuentes|"
+                      r"en que te basas|quien eres|que eres\b|eres (un |una )?(medico|doctora?|ia|inteligencia artificial|"
+                      r"robot|humano|persona)|que modelo (eres|usas)|como funcionas)")
+# "¿Es malo comer mucho azúcar?": about what you eat or drink and its effect, without waiting
+# for the model classifier ("¿es bueno el café?" alone is still decided by the model)
+HABIT = re.compile(r"\bes (malo|bueno|sano|peligroso|perjudicial|recomendable|normal) (para (la salud|el cuerpo) )?"
+                   r"(comer|beber|tomar|consumir|abusar|no comer|no beber|saltarse|ayunar)\b")
 # Cooking recipes are not health questions, unless they are for an illness or a diet
 COOKING = re.compile(r"\breceta(s)? (de|para)\b(?! (un |una |el |la )?(medicamento|medicina|antibiotic|pastilla|"
                      r"farmac|ibuprofeno|paracetamol|jarabe))|\b(cocinar|guisar|guiso|al horno|ingredientes)\b")
@@ -115,11 +133,13 @@ def classify(question: str, health_conversation: bool = False) -> tuple[str, Opt
         return "other", GREETING
     if THANKS_RE.match(bare):
         return "other", THANKS
+    if ABOUT_RE.search(plain) and not HEALTH.search(plain):
+        return "other", ABOUT
     if PET.search(plain) and not HUMAN_BITE.search(plain):
         return "other", VET
     if COOKING.search(plain):
         return ("health", None) if DIET_CONDITION.search(plain) else ("other", OFF_TOPIC)
-    health = bool(HEALTH.search(plain)) or _mentions_medicine_or_test(plain)
+    health = bool(HEALTH.search(plain) or HABIT.search(plain)) or _mentions_medicine_or_test(plain)
     other = bool(OTHER.search(plain) or TASK.search(plain))
     if health and other:
         # "me torcí el tobillo jugando al fútbol" (health) or "resuelve este ejercicio de
@@ -137,5 +157,5 @@ def classify(question: str, health_conversation: bool = False) -> tuple[str, Opt
 def health_conversation(history: list[dict]) -> bool:
     """True if the model has already answered something in this conversation (only health
     questions reach it), so short follow-ups can pass."""
-    fixed = {OFF_TOPIC, GREETING, THANKS, VET}
+    fixed = {OFF_TOPIC, GREETING, THANKS, VET, ABOUT}
     return any(m.get("role") == "assistant" and m.get("content") not in fixed for m in history)

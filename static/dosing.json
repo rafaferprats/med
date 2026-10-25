@@ -1,0 +1,21 @@
+[
+  {"name": "Paracetamol", "match": "paracetamol|acetaminof|acetaminophen", "how": "1 comprimido de 500 mg a 1 g cada 6–8 horas. No superes 3 g al día."},
+  {"name": "Dexketoprofeno", "match": "dexketoprofen", "how": "1 comprimido de 25 mg cada 8 horas, con comida. No superes 75 mg al día."},
+  {"name": "Ibuprofeno", "match": "ibuprofen", "how": "1 comprimido de 200 o 400 mg cada 6–8 horas, con comida. No superes 1.200 mg al día."},
+  {"name": "Naproxeno", "match": "naproxen", "how": "1 comprimido de 220 mg cada 8–12 horas, con comida. No superes 660 mg al día."},
+  {"name": "Aspirina", "match": "aspirin|acetilsalic|acetylsalicylic", "how": "1 comprimido de 500 mg cada 4–6 horas, con comida. No superes la dosis máxima del prospecto."},
+  {"name": "Omeprazol", "match": "omeprazol", "how": "1 cápsula de 20 mg al día, antes del desayuno. Sin receta, máximo 14 días seguidos."},
+  {"name": "Almagato", "match": "almagato", "how": "1 sobre o 2 comprimidos masticables después de las comidas y al acostarte, cuando tengas molestias."},
+  {"name": "Loratadina", "match": "loratadin", "how": "1 comprimido de 10 mg al día."},
+  {"name": "Cetirizina", "match": "cetirizin", "how": "1 comprimido de 10 mg al día, mejor por la noche (puede dar sueño)."},
+  {"name": "Oximetazolina", "match": "oximetazolin|oxilmetazolin|oxymetazolin", "how": "1–2 pulverizaciones en cada fosa nasal cada 12 horas. Máximo 3 días seguidos."},
+  {"name": "Loperamida", "match": "loperamid", "how": "2 cápsulas (4 mg) al principio y 1 (2 mg) tras cada deposición líquida. No superes 6 al día ni 2 días seguidos."},
+  {"name": "Plantago ovata", "match": "plantago", "how": "1 sobre 1–3 veces al día, disuelto en un vaso grande de agua, y bebe más agua durante el día."},
+  {"name": "Macrogol", "match": "macrogol", "how": "1–2 sobres al día disueltos en medio vaso de agua. Sin receta, como mucho 2 semanas seguidas."},
+  {"name": "Dimenhidrinato", "match": "dimenhidrinato|biodramina", "how": "1 comprimido de 50 mg media hora antes del viaje; si hace falta, otro cada 4–6 horas. No superes 8 al día. Da sueño: no conduzcas."},
+  {"name": "Clotrimazol crema", "match": "clotrimazol", "how": "Una capa fina 2–3 veces al día en la zona limpia y seca. Sigue 2 semanas más después de que desaparezcan las molestias."},
+  {"name": "Aciclovir crema", "match": "aciclovir", "how": "Aplícala 5 veces al día (cada 4 horas, de día) durante 5 días, desde el primer picor."},
+  {"name": "Hidrocortisona crema", "match": "hidrocortisona|hydrocortison", "how": "Una capa fina 1–2 veces al día en la zona. Máximo 7 días seguidos."},
+  {"name": "Suero oral de rehidratación", "match": "rehidrataci|suero oral", "how": "Prepáralo como indica el sobre y bébelo a sorbos frecuentes."},
+  {"name": "Suero fisiológico", "match": "salin|suero fisiol|agua de mar", "how": "Lavados nasales varias veces al día, cuando lo necesites."}
+]

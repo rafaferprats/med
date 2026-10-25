@@ -1,5 +1,7 @@
 import asyncio
 import io
+import json
+from urllib.parse import quote
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -17,10 +19,12 @@ from pydantic import BaseModel
 
 import auth
 import billing
+import dosing
 import labs
 import pdf_guard
-from config import (BILLING_MODE, COOKIE_NAME, FREE_DAILY_QUESTIONS, FREE_IMAGES, FREE_LABS, FREE_QUESTIONS,
+from config import (BILLING_MODE, COOKIE_NAME, FEATURES, FREE_DAILY_QUESTIONS, FREE_IMAGES, FREE_LABS, FREE_QUESTIONS,
                     GUEST_COOKIE_NAME, PLANS, TOKEN_DAYS)
+from config import DB_PATH
 from db import init_db
 from questions import prepare, split_context
 from safety import EMERGENCY_MESSAGE, detect_emergency
@@ -334,30 +338,49 @@ async def ask(history: list[dict], on_fail=None) -> str:
     return text
 
 
+# Answers being generated right now, to see in data/server.log whether people wait in a queue
+_in_flight = 0
+
+
 def stream_response(
     sid: str, history: list[dict], on_fail=None, headers: Optional[dict] = None
 ) -> StreamingResponse:
-    """Streams the answer. on_fail runs if the model produced no visible text."""
+    """Streams the answer. on_fail runs if the model produced no visible text. Logs when the
+    first words were sent and when the answer ended (data/server.log)."""
     async def generator():
+        global _in_flight
+        _in_flight += 1
+        together = _in_flight
+        t0 = time.monotonic()
+        first = None
         full = ""
-        f = ThinkFilter()
         try:
-            async for chunk in await client.chat(
-                model=MODEL,
-                messages=build_messages(history),
-                options=OPTIONS,
-                stream=True,
-            ):
-                visible = strip_tokens(f.feed(chunk.message.content))
-                if not full:
-                    visible = visible.lstrip()
-                if visible:
-                    full += visible
-                    yield visible
-            tail = f.flush()
-            if tail:
-                full += tail
-                yield tail
+            # Sometimes the model spends all num_predict thinking and writes nothing: one more
+            # try with only the latest question, before telling the person it could not answer
+            for attempt in range(2):
+                f = ThinkFilter()
+                context = history if attempt == 0 else history[-1:]
+                async for chunk in await client.chat(
+                    model=MODEL,
+                    messages=build_messages(context),
+                    options=OPTIONS,
+                    stream=True,
+                ):
+                    visible = strip_tokens(f.feed(chunk.message.content))
+                    if not full:
+                        visible = visible.lstrip()
+                    if visible:
+                        if first is None:
+                            first = time.monotonic() - t0
+                        full += visible
+                        yield visible
+                tail = f.flush()
+                if tail:
+                    full += tail
+                    yield tail
+                if full.strip():
+                    break
+                request_log.info(f"RESPUESTA vacía (intento {attempt + 1})")
             if not full.strip():
                 # Not stored or counted (see finally), but the person gets a clear message
                 yield EMPTY_ANSWER
@@ -365,6 +388,10 @@ def stream_response(
             print(f"[ERROR Ollama] {e!r}")  # shown in the uvicorn terminal
             yield f"\n[Error de Ollama: {e}]"
         finally:
+            _in_flight -= 1
+            request_log.info(
+                f"RESPUESTA primeras palabras {first if first is not None else -1:.1f}s · completa "
+                f"{time.monotonic() - t0:.1f}s · {len(full.split())} palabras · a la vez: {together}")
             if full:
                 history.append({"role": "assistant", "content": full})
             else:
@@ -447,7 +474,8 @@ async def plans():
     return {"billing_mode": BILLING_MODE,
             "plans": {pid: {k: p[k] for k in public if k in p} for pid, p in PLANS.items()},
             "free": {"text": FREE_QUESTIONS, "image": FREE_IMAGES, "lab": FREE_LABS,
-                     "daily": FREE_DAILY_QUESTIONS}}
+                     "daily": FREE_DAILY_QUESTIONS},
+            "features": [{"name": n, "free": f, "premium": p} for n, f, p in FEATURES]}
 
 
 # Plain "def": the Stripe calls block, so FastAPI runs these in a worker thread
@@ -509,7 +537,9 @@ async def on_topic(question: str, history: list[dict]) -> Optional[str]:
         resp = await asyncio.wait_for(client.chat(
             model=MODEL,
             messages=[{"role": "system", "content": topic.CLASSIFIER_PROMPT}, {"role": "user", "content": question}],
-            options={"temperature": 0, "num_predict": 600, "num_ctx": 2048},
+            # Same num_ctx as every other call: a different one makes Ollama reload the model and
+            # wait for the answers in progress (62 s instead of 1.6 s with 2 answers running)
+            options={**OPTIONS, "temperature": 0, "num_predict": 600},
         ), timeout=25)
         verdict = clean(resp.message.content).upper()
     except Exception as e:
@@ -536,7 +566,13 @@ SIGNUP_MESSAGE = (
 )
 
 
-def guest_chat(req: ChatRequest, request: Request, entry: dict) -> StreamingResponse:
+def suggested_header(prep) -> dict:
+    """The right medicines for the symptom, for the interface to build the table if the model
+    writes none ("No hace falta medicación" to a child with diarrhoea). URL-encoded JSON."""
+    return {"X-Suggested-Meds": quote(json.dumps(prep.suggested, ensure_ascii=False))} if prep.suggested else {}
+
+
+def guest_chat(req: ChatRequest, request: Request, entry: dict, extra: Optional[dict] = None) -> StreamingResponse:
     """Visitors without an account get GUEST_QUESTIONS answers, then are asked to sign up.
     Emergencies are always answered."""
     guest_id = request.cookies.get(GUEST_COOKIE_NAME) or secrets.token_urlsafe(16)
@@ -557,7 +593,7 @@ def guest_chat(req: ChatRequest, request: Request, entry: dict) -> StreamingResp
             headers={"X-Session-Id": sid, "X-Emergency": "1"},
         )
     else:
-        headers = {"X-Guest": "1"}
+        headers = {"X-Guest": "1", **(extra or {})}
         if emergency:
             headers["X-Emergency"] = "1"
         response = stream_response(
@@ -582,7 +618,11 @@ async def chat_stream(req: ChatRequest, request: Request, user=Depends(auth.opti
         sid, history = get_history(req.session_id, owner)
         headers = {"X-Emergency": "1", **(usage_headers(user["id"]) if user else {})}
         return fixed_response(sid, history, question, EMERGENCY_MESSAGE, headers)
-    prep = await asyncio.to_thread(prepare, req.message)
+    # The conversation so far: follow-ups ("¿cada cuánto debo tomarlo?") are never cut by the filters
+    owner = user["id"] if user else f"guest:{request.cookies.get(GUEST_COOKIE_NAME, '')}"
+    previous = sessions.get(req.session_id or "")
+    previous = previous["history"] if previous and previous["user_id"] == owner else []
+    prep = await asyncio.to_thread(prepare, req.message, topic.health_conversation(previous))
     if prep.fixed_answer and not detect_emergency(req.message):
         # Medicine that does not exist, or "what is X?" for a real one: answered from code,
         # with the official CIMA facts, and not counted
@@ -590,24 +630,27 @@ async def chat_stream(req: ChatRequest, request: Request, user=Depends(auth.opti
         sid, history = get_history(req.session_id, owner)
         headers = usage_headers(user["id"]) if user else {}
         return fixed_response(sid, history, prep.entry["content"], prep.fixed_answer, headers)
+    # "¿Cada cuánto debo tomarlo?" in a conversation: the reviewed text of each medicine (dosing.py)
+    how_to_take = dosing.follow_up_answer(question, previous, split_context(req.message)[0])
+    if how_to_take:
+        sid, history = get_history(req.session_id, owner)
+        headers = usage_headers(user["id"]) if user else {}
+        return fixed_response(sid, history, question, how_to_take, headers)
     # Only health questions reach the model (topic.py): anything else gets a fixed answer, not counted
-    owner = user["id"] if user else f"guest:{request.cookies.get(GUEST_COOKIE_NAME, '')}"
-    previous = sessions.get(req.session_id or "")
-    previous = previous["history"] if previous and previous["user_id"] == owner else []
     off_topic = await on_topic(question, previous)
     if off_topic:
         sid, history = get_history(req.session_id, owner)
         headers = usage_headers(user["id"]) if user else {}
         return fixed_response(sid, history, question, off_topic, headers)
     if user is None:
-        return guest_chat(req, request, prep.entry)
+        return guest_chat(req, request, prep.entry, suggested_header(prep))
     security.check_question_rate(request, f"user:{user['id']}")
     emergency, counted = check_quota(user, "text", req.message)
     sid, history = get_history(req.session_id, user["id"])
     history.append(prep.entry)
     if not counted:
         return emergency_response(sid, history, user["id"])
-    headers = usage_headers(user["id"])
+    headers = usage_headers(user["id"]) | suggested_header(prep)
     if emergency:
         headers["X-Emergency"] = "1"
     return stream_response(
@@ -758,9 +801,11 @@ async def delete_session(session_id: str, user=Depends(auth.current_user)):
 
 # Requests log for chat, images and lab reports: time, route, result, size and duration (never the
 # content of messages or files). Also the full error when something fails. data/ is not in git.
-Path(__file__).parent.joinpath("data").mkdir(exist_ok=True)
+# Next to the database: data/server.log for the real server, a temporary folder for the tests
+LOG_PATH = DB_PATH.parent / "server.log"
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 request_log = logging.getLogger("medapp.requests")
-_handler = logging.FileHandler(Path(__file__).parent / "data" / "server.log")
+_handler = logging.FileHandler(LOG_PATH)
 _handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 request_log.addHandler(_handler)
 request_log.setLevel(logging.INFO)
@@ -777,7 +822,7 @@ async def revalidate_static(request: Request, call_next):
         return Response("Petición demasiado grande", status_code=413)
     response = await call_next(request)
     response.headers.update(security.SECURITY_HEADERS)
-    if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css", ".svg")):
+    if request.url.path == "/" or request.url.path.endswith((".html", ".js", ".css", ".svg", ".json")):
         response.headers["Cache-Control"] = "no-cache"
     return response
 

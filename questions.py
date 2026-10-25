@@ -16,6 +16,7 @@ from typing import Optional
 
 import guardrails
 from medicines import analyse, candidate_names, lookup, unknown_answer
+from symptom_meds import medicines_for, suggested_for
 
 CONTEXT_RE = re.compile(r"^\s*\[Contexto:\s*(.*?)\]\s*$")
 NSAIDS = "ibuprofeno, naproxeno, dexketoprofeno, diclofenaco y aspirina (ácido acetilsalicílico)"
@@ -36,6 +37,7 @@ class Prepared:
     entry: dict                      # the user message as stored in the conversation
     fixed_answer: Optional[str] = None  # answer written in code, the model is not used
     notes: list[str] = field(default_factory=list)
+    suggested: list = field(default_factory=list)  # (medicine, what for) for the symptom (symptom_meds.py)
 
 
 def split_context(message: str) -> tuple[str, str]:
@@ -91,10 +93,10 @@ def info_question_name(question: str) -> Optional[str]:
     return None
 
 
-def prepare(message: str) -> Prepared:
+def prepare(message: str, in_conversation: bool = False) -> Prepared:
     context, question = split_context(message)
     # Dangerous or off-topic requests get a fixed answer (guardrails.py)
-    rule = guardrails.check(question)
+    rule = guardrails.check(question, in_conversation)
     if rule:
         return Prepared(entry={"role": "user", "content": question}, fixed_answer=rule[1])
     facts, unknown = analyse(message)
@@ -113,6 +115,10 @@ def prepare(message: str) -> Prepared:
         notes += restrictions_for(context)
         if len(notes) > 1:
             notes.append("No pongas esos medicamentos en la tabla de Medicación: menciónalos solo en 'Evitar:'.")
+    # The right over-the-counter medicines for the symptom (symptom_meds.py)
+    meds_note = medicines_for(question, context or "")
+    if meds_note:
+        notes.append(meds_note)
     if facts:
         notes.append("Datos oficiales de CIMA (AEMPS), úsalos en lugar de tu memoria y no los repitas tal cual:\n"
                      + facts.replace("[Datos oficiales de CIMA (AEMPS)", "-").replace(". Explica qué es usando "
@@ -120,4 +126,4 @@ def prepare(message: str) -> Prepared:
     entry = {"role": "user", "content": question}
     if notes:
         entry["notes"] = "\n".join(notes)
-    return Prepared(entry=entry, notes=notes)
+    return Prepared(entry=entry, notes=notes, suggested=suggested_for(question, context or ""))

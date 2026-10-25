@@ -98,6 +98,19 @@ def main_test():
     r = a.post("/chat/stream", json=ASK)
     assert r.status_code == 200 and r.headers["X-Usage-Text"] == "unlimited"
 
+    # The model wrote nothing (all thinking): one more try with only the question
+    calls = []
+
+    async def empty_then_answer(**kwargs):
+        calls.append(len(kwargs["messages"]))
+        async def gen():
+            yield FakeChunk("" if len(calls) == 1 else "Second try.")
+        return gen()
+    main.client.chat = empty_then_answer
+    r = a.post("/chat/stream", json=ASK)
+    main.client.chat = fake_chat
+    assert r.text == "Second try." and len(calls) == 2, (r.text, calls)
+
     assert a.post("/auth/logout").status_code == 204
     assert a.get("/me").status_code == 401
     print("smoke test OK")
